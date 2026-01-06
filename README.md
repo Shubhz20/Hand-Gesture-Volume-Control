@@ -20,7 +20,7 @@ A Python application that uses hand gestures to control computer volume on macOS
 1. Clone the repository:
 
 ```
-git clone <repository-url>
+git clone https://github.com/Shubhz20/Hand-Gesture-Volume-Control.git
 cd gesture-computer-control
 ```
 
@@ -35,6 +35,7 @@ source venv39/bin/activate
 
 ```
 pip install opencv-python mediapipe pyautogui numpy
+pip install -r requirements.txt
 ```
 
 ## Usage
