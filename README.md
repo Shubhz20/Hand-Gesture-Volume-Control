@@ -18,18 +18,21 @@ A Python application that uses hand gestures to control computer volume on macOS
 ## Installation
 
 1. Clone the repository:
+
 ```
 git clone <repository-url>
 cd gesture-computer-control
 ```
 
 2. Create a virtual environment:
+
 ```
 python3.9 -m venv venv39
 source venv39/bin/activate
 ```
 
 3. Install dependencies:
+
 ```
 pip install opencv-python mediapipe pyautogui numpy
 ```
@@ -37,6 +40,7 @@ pip install opencv-python mediapipe pyautogui numpy
 ## Usage
 
 Run the application:
+
 ```
 python HandTrackingMin.py
 ```
@@ -55,4 +59,3 @@ The application uses MediaPipe to detect hand landmarks. It calculates the dista
 - mediapipe
 - pyautogui
 - numpy
-

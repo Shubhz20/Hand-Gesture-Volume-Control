@@ -1,14 +1,14 @@
-venv39/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-*.egg
-*.egg-info/
-dist/
-build/
-.DS_Store
-*.log
+# venv39/
+# __pycache__/
+# *.pyc
+# *.pyo
+# *.pyd
+# .Python
+# *.so
+# *.egg
+# *.egg-info/
+# dist/
+# build/
+# .DS_Store
+# *.log
 
