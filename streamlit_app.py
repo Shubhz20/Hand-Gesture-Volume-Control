@@ -5,6 +5,8 @@ import math
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 
 st.title("🎵 Hand Gesture Volume Controller (Web Demo)")
+st.caption("v1")
+
 
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(
