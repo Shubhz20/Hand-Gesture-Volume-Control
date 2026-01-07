@@ -1,4 +1,4 @@
-#!/Users/harshitagrawal/gesture-computer-control/venv39/bin/python3.9
+#!/Users/harshitagrawal/gesture-computer-control/venv39/bin/python
 import sys
 from fontTools.ttx import main
 if __name__ == '__main__':

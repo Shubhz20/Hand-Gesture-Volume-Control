@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Gesture Volume Demo</title>
+  <style>
+    body {
+      font-family: Arial;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-top: 60px;
+    }
+    .card {
+      border: 1px solid #ddd;
+      padding: 20px;
+      border-radius: 10px;
+      width: 380px;
+      text-align: center;
+      box-shadow: 0 5px 10px rgba(0,0,0,.1);
+    }
+    h2 { margin-bottom: 15px; }
+  </style>
+</head>
+
+<body>
+  <div class="card">
+    <h2>Gesture Volume Controller 🎵</h2>
+
+    <audio id="player" controls>
+      <source src="song.mp3" type="audio/mpeg">
+      Your browser does not support audio.
+    </audio>
+
+    <p style="margin-top:15px;">
+      Current Volume: <strong id="vol">--%</strong>
+    </p>
+  </div>
+
+  <script>
+    async function fetchVolume() {
+      try {
+        const res = await fetch("http://127.0.0.1:5055/volume");
+        const data = await res.json();
+        document.getElementById("vol").innerText = data.volume + "%";
+      } catch (err) {
+        document.getElementById("vol").innerText = "--";
+      }
+    }
+
+    setInterval(fetchVolume, 400);
+  </script>
+</body>
+</html>
