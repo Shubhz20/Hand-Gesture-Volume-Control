@@ -1,14 +1,29 @@
 import streamlit as st
 import cv2
-import mediapipe as mp
 import math
+
+try:
+    import mediapipe as mp
+    mp_hands = mp.solutions.hands
+    mp_draw = mp.solutions.drawing_utils
+except AttributeError:
+    # fallback for new API
+    from mediapipe.tasks.python.vision import HandLandmarker
+    from mediapipe.framework.formats import landmark_pb2
+    mp_hands = None
+    mp_draw = None
+
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+
 
 st.title("🎵 Hand Gesture Volume Controller (Web Demo)")
 st.caption("v1")
 
 
-mp_hands = mp.solutions.hands
+from mediapipe import solutions as mp_solutions
+mp_hands = mp_solutions.hands
+mp_draw = mp_solutions.drawing_utils
+
 hands = mp_hands.Hands(
     max_num_hands=1,
     min_detection_confidence=0.5,
