@@ -43,7 +43,6 @@ pillow==11.3.0
 protobuf==3.20.3
 pyarrow==21.0.0
 PyAutoGUI==0.9.54
-pycparser==2.23
 pydeck==0.9.1
 pyee==13.0.0
 PyGetWindow==0.0.9
