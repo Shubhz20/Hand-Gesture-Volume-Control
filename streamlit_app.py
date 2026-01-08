@@ -1,61 +1,90 @@
-import streamlit as st
 import cv2
 import mediapipe as mp
-import math
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+import subprocess
+import threading
+from flask import Flask, jsonify
 
-st.title("🎵 Hand Gesture Volume Controller (Web Demo)")
+app = Flask(__name__)
+current_volume = 0
+
+@app.route("/volume", methods=["GET"])
+def get_volume():
+    return jsonify({"volume": int(current_volume)})
+
+def run_server():
+    app.run(host="127.0.0.1", port=5055, debug=False)
+
+# ------------ VOLUME + HAND LOGIC ------------
+x1 = y1 = x2 = y2 = 0
+
+def set_volume_mac(volume):
+    volume = max(0, min(100, int(volume)))
+    subprocess.call(["osascript", "-e", f"set volume output volume {volume}"])
 
 
-mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(
-    max_num_hands=1,
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5
-)
-draw = mp.solutions.drawing_utils
+my_hands = mp.solutions.hands.Hands()
+drawing_utils = mp.solutions.drawing_utils
 
+webcam = cv2.VideoCapture(0)
 
-class Processor(VideoProcessorBase):
-    def __init__(self):
-        self.volume = 0.3
+prev_volume = 0
+smooth_factor = 0.5
 
-    def recv(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+set_volume_mac(prev_volume)
 
-        result = hands.process(rgb)
+while True:
+    ret, image = webcam.read()
+    if not ret:
+        break
 
-        x1 = y1 = x2 = y2 = 0
+    image = cv2.flip(image, 1)
+    frame_height, frame_width, _ = image.shape
 
-        if result.multi_hand_landmarks:
-            hand = result.multi_hand_landmarks[0]
-            draw.draw_landmarks(img, hand, mp_hands.HAND_CONNECTIONS)
+    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    output = my_hands.process(rgb_image)
+    hands = output.multi_hand_landmarks
 
-            h, w, _ = img.shape
-            for i, lm in enumerate(hand.landmark):
-                x, y = int(lm.x * w), int(lm.y * h)
+    if hands:
+        for hand in hands:
+            drawing_utils.draw_landmarks(image, hand)
+            landmarks = hand.landmark
 
-                if i == 8:  # index
+            for id, landmark in enumerate(landmarks):
+                x = int(landmark.x * frame_width)
+                y = int(landmark.y * frame_height)
+
+                if id == 8:   # index
                     x1, y1 = x, y
-                if i == 4:  # thumb
+                if id == 4:   # thumb
                     x2, y2 = x, y
 
-            dist = math.dist((x1, y1), (x2, y2))
+    dist = ((x2 - x1)**2 + (y2 - y1)**2) ** 0.5 // 4
 
-            # map to 0–1 volume range
-            self.volume = max(0, min(1, (dist - 30) / (200 - 30)))
+    volume = max(0, min(100, (dist - 30) / (200 - 30) * 100))
 
-        return img
+    prev_volume += (volume - prev_volume) * smooth_factor
+    current_volume = prev_volume
+
+    set_volume_mac(prev_volume)
+
+    cv2.putText(
+        image,
+        f"Volume: {int(prev_volume)}%",
+        (20, 50),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1,
+        (0, 0, 0),
+        4,
+    )
+
+    cv2.line(image, (x1, y1), (x2, y2), (0, 255, 0), 5)
 
 
-stream = webrtc_streamer(key="gesture")
 
-if stream.video_processor:
-    st.write("✋ Move fingers to change volume")
+    cv2.imshow("Gesture Control", image)
 
-    st.session_state.volume = stream.video_processor.volume
+    if cv2.waitKey(10) == 27:
+        break
 
-    # browser music player
-    st.audio("song.mp3", start_time=0)
-    st.write(f"🔊 Volume level: **{round(st.session_state.volume,2)}**")
+webcam.release()
+cv2.destroyAllWindows()
