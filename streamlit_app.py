@@ -108,10 +108,8 @@ class AudioVolumeProcessor(AudioProcessorBase):
                 rate=frame.sample_rate,
             )
 
-        # We need to fill the output frame with specific number of samples
         samples_needed = frame.samples
         
-        # Keep decoding and filling the FIFO until we have enough samples
         while self.fifo.samples < samples_needed:
             try:
                 song_frame = next(self.packet_generator)
@@ -121,15 +119,12 @@ class AudioVolumeProcessor(AudioProcessorBase):
                 self.packet_generator = self.container.decode(self.stream)
                 song_frame = next(self.packet_generator)
             except Exception:
-                # If anything else goes wrong, break to avoid infinite loop
                 break
 
-            # Resample strictly to match the target format
             resampled_frames = self.resampler.resample(song_frame)
             if resampled_frames:
                 self.fifo.write(resampled_frames[0])
 
-        # Now read exactly the amount of samples we need
         if self.fifo.samples >= samples_needed:
             output_frame = self.fifo.read(samples_needed)
             
@@ -144,7 +139,6 @@ class AudioVolumeProcessor(AudioProcessorBase):
             else:
                  new_samples = raw_samples
 
-            # Re-pack into a frame with correct timing from the input implementation
             new_frame = av.AudioFrame.from_ndarray(new_samples, layout=frame.layout.name)
             new_frame.sample_rate = frame.sample_rate
             new_frame.time_base = frame.time_base
@@ -152,15 +146,11 @@ class AudioVolumeProcessor(AudioProcessorBase):
             return new_frame
         
         else:
-            # Fallback if we couldn't decode enough (should rarely happen unless file error)
-            # Return silence
             return av.AudioFrame.from_ndarray(
                 np.zeros((frame.layout.channels, samples_needed), dtype=frame.to_ndarray().dtype),
                 layout=frame.layout.name
             )
 
-# We removed "source_audio=player" to avoid TypeError.
-# The user MUST allow Microphone for this to work (it acts as the clock).
 webrtc_streamer(
     key="gesture-volume",
     mode=WebRtcMode.SENDRECV,
