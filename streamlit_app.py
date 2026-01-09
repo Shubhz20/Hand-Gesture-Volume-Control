@@ -97,9 +97,10 @@ class AudioVolumeProcessor(AudioProcessorBase):
         self.stream = self.container.streams.audio[0]
         self.packet_generator = self.container.decode(self.stream)
         self.resampler = None
+        self.fifo = av.AudioFifo()
 
     def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
-        # Lazy initialization of resampler based on the client's requested format (usually 48kHz, stereo)
+        # Initialize resampler once we know the target format from the first incoming frame
         if self.resampler is None:
             self.resampler = av.AudioResampler(
                 format=frame.format.name,
@@ -107,50 +108,56 @@ class AudioVolumeProcessor(AudioProcessorBase):
                 rate=frame.sample_rate,
             )
 
-        try:
-            # Read next audio frame from the file
-            song_frame = next(self.packet_generator)
-        except StopIteration:
-            # Loop: seek to start and continue
-            self.container.seek(0)
-            # Re-create generator/decoder context
-            self.packet_generator = self.container.decode(self.stream)
-            song_frame = next(self.packet_generator)
+        # We need to fill the output frame with specific number of samples
+        samples_needed = frame.samples
         
-        # Determine how many "frames" (time) we need to fill to match input frame
-        # Actually, best effort: we just resample the song_frame to match target characteristics.
-        # Note: Input frame 'frame' drives the timing. We want to output similar duration.
+        # Keep decoding and filling the FIFO until we have enough samples
+        while self.fifo.samples < samples_needed:
+            try:
+                song_frame = next(self.packet_generator)
+            except StopIteration:
+                # Loop the song: seek to beginning
+                self.container.seek(0)
+                self.packet_generator = self.container.decode(self.stream)
+                song_frame = next(self.packet_generator)
+            except Exception:
+                # If anything else goes wrong, break to avoid infinite loop
+                break
+
+            # Resample strictly to match the target format
+            resampled_frames = self.resampler.resample(song_frame)
+            if resampled_frames:
+                self.fifo.write(resampled_frames[0])
+
+        # Now read exactly the amount of samples we need
+        if self.fifo.samples >= samples_needed:
+            output_frame = self.fifo.read(samples_needed)
+            
+            # Apply Volume
+            raw_samples = output_frame.to_ndarray()
+            
+            # Safe multiplication for volume
+            if raw_samples.dtype.kind == 'i':
+                new_samples = (raw_samples * shared_state.volume).astype(raw_samples.dtype)
+            elif raw_samples.dtype.kind == 'f':
+                 new_samples = (raw_samples * shared_state.volume).astype(raw_samples.dtype)
+            else:
+                 new_samples = raw_samples
+
+            # Re-pack into a frame with correct timing from the input implementation
+            new_frame = av.AudioFrame.from_ndarray(new_samples, layout=frame.layout.name)
+            new_frame.sample_rate = frame.sample_rate
+            new_frame.time_base = frame.time_base
+            new_frame.pts = frame.pts
+            return new_frame
         
-        # Resample the song frame to match input constraints
-        resampled_frames = self.resampler.resample(song_frame)
-        
-        # 'resampled_frames' is a list of frames (usually 1 if sizes match well).
-        # We take the first one. If empty, we might need to pull more, but simplistic approach first.
-        if not resampled_frames:
-             # Just return silent frame if we missed a beat
-             return frame
-        
-        output_frame = resampled_frames[0]
-        
-        # Convert to numpy to apply volume
-        raw_samples = output_frame.to_ndarray()
-        
-        # Apply volume from shared state
-        # Ensure we don't overflow if using integers
-        if raw_samples.dtype.kind == 'i':
-             # integer types
-             new_samples = (raw_samples * shared_state.volume).astype(raw_samples.dtype)
         else:
-             # float types
-             new_samples = (raw_samples * shared_state.volume).astype(raw_samples.dtype)
-             
-        # Pack back into AudioFrame
-        new_frame = av.AudioFrame.from_ndarray(new_samples, layout=output_frame.layout.name)
-        new_frame.sample_rate = output_frame.sample_rate
-        new_frame.time_base = output_frame.time_base
-        new_frame.pts = frame.pts # Sync PTS with the input 'clock' from Mic
-        
-        return new_frame
+            # Fallback if we couldn't decode enough (should rarely happen unless file error)
+            # Return silence
+            return av.AudioFrame.from_ndarray(
+                np.zeros((frame.layout.channels, samples_needed), dtype=frame.to_ndarray().dtype),
+                layout=frame.layout.name
+            )
 
 # We removed "source_audio=player" to avoid TypeError.
 # The user MUST allow Microphone for this to work (it acts as the clock).
