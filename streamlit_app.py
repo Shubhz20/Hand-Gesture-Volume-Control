@@ -3,10 +3,11 @@ import mediapipe as mp
 import numpy as np
 import streamlit as st
 import av
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, AudioProcessorBase, WebRtcMode, MediaPlayer
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, AudioProcessorBase, WebRtcMode
+from aiortc.contrib.media import MediaPlayer
 
 # Title and description
-st.title("Hand Gesture Volume Control 🎵")
+st.title("Hand Gesture Volume Control")
 st.markdown(
     """
     **Instructions:**
