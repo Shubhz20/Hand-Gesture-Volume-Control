@@ -92,38 +92,73 @@ class GestureProcessor(VideoProcessorBase):
         return av.VideoFrame.from_ndarray(image, format="bgr24")
 
 class AudioVolumeProcessor(AudioProcessorBase):
+    def __init__(self):
+        self.container = av.open("song.mp3")
+        self.stream = self.container.streams.audio[0]
+        self.packet_generator = self.container.decode(self.stream)
+        self.resampler = None
+
     def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
-        # Convert audio to numpy array
-        # Audio is typically separate planar or packed.
-        # We need to handle different layouts, but typically simpler to just multiply using valid numpy types.
+        # Lazy initialization of resampler based on the client's requested format (usually 48kHz, stereo)
+        if self.resampler is None:
+            self.resampler = av.AudioResampler(
+                format=frame.format.name,
+                layout=frame.layout.name,
+                rate=frame.sample_rate,
+            )
+
+        try:
+            # Read next audio frame from the file
+            song_frame = next(self.packet_generator)
+        except StopIteration:
+            # Loop: seek to start and continue
+            self.container.seek(0)
+            # Re-create generator/decoder context
+            self.packet_generator = self.container.decode(self.stream)
+            song_frame = next(self.packet_generator)
         
-        # Convert to numpy (int16 or float32 depending on source)
-        raw_samples = frame.to_ndarray()
+        # Determine how many "frames" (time) we need to fill to match input frame
+        # Actually, best effort: we just resample the song_frame to match target characteristics.
+        # Note: Input frame 'frame' drives the timing. We want to output similar duration.
         
-        # Apply volume
-        new_samples = (raw_samples * shared_state.volume).astype(raw_samples.dtype)
+        # Resample the song frame to match input constraints
+        resampled_frames = self.resampler.resample(song_frame)
         
-        # Create new frame
-        new_frame = av.AudioFrame.from_ndarray(new_samples, layout=frame.layout.name)
-        new_frame.sample_rate = frame.sample_rate
-        new_frame.time_base = frame.time_base
-        new_frame.pts = frame.pts
+        # 'resampled_frames' is a list of frames (usually 1 if sizes match well).
+        # We take the first one. If empty, we might need to pull more, but simplistic approach first.
+        if not resampled_frames:
+             # Just return silent frame if we missed a beat
+             return frame
+        
+        output_frame = resampled_frames[0]
+        
+        # Convert to numpy to apply volume
+        raw_samples = output_frame.to_ndarray()
+        
+        # Apply volume from shared state
+        # Ensure we don't overflow if using integers
+        if raw_samples.dtype.kind == 'i':
+             # integer types
+             new_samples = (raw_samples * shared_state.volume).astype(raw_samples.dtype)
+        else:
+             # float types
+             new_samples = (raw_samples * shared_state.volume).astype(raw_samples.dtype)
+             
+        # Pack back into AudioFrame
+        new_frame = av.AudioFrame.from_ndarray(new_samples, layout=output_frame.layout.name)
+        new_frame.sample_rate = output_frame.sample_rate
+        new_frame.time_base = output_frame.time_base
+        new_frame.pts = frame.pts # Sync PTS with the input 'clock' from Mic
+        
         return new_frame
 
-# Setup Media Player
-# Note: 'song.mp3' must be locally available
-try:
-    player = MediaPlayer("song.mp3")
-except Exception as e:
-    st.error(f"Could not load song.mp3: {e}")
-    player = None
-
-if player:
-    webrtc_streamer(
-        key="gesture-volume",
-        mode=WebRtcMode.SENDRECV,
-        rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
-        video_processor_factory=GestureProcessor,
-        audio_processor_factory=AudioVolumeProcessor,
-        source_audio=player,
-    )
+# We removed "source_audio=player" to avoid TypeError.
+# The user MUST allow Microphone for this to work (it acts as the clock).
+webrtc_streamer(
+    key="gesture-volume",
+    mode=WebRtcMode.SENDRECV,
+    rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+    video_processor_factory=GestureProcessor,
+    audio_processor_factory=AudioVolumeProcessor,
+    media_stream_constraints={"video": True, "audio": True}, # Request Mic!
+)
