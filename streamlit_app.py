@@ -1,73 +1,90 @@
-import streamlit as st
+import cv2
 import mediapipe as mp
-import numpy as np
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
-import av
+import subprocess
+import threading
+from flask import Flask, jsonify
 
-st.set_page_config(page_title="Gesture Volume Control")
-st.title("Gesture Volume Controller 🎵")
-st.caption("Streamlit Demo (Web-safe)")
+app = Flask(__name__)
+current_volume = 0
 
-# --------- MediaPipe setup ----------
-mp_hands = mp.solutions.hands
-mp_draw = mp.solutions.drawing_utils
+@app.route("/volume", methods=["GET"])
+def get_volume():
+    return jsonify({"volume": int(current_volume)})
 
-class HandProcessor(VideoProcessorBase):
-    def __init__(self):
-        self.hands = mp_hands.Hands(
-            max_num_hands=1,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
-        )
-        self.volume = 0
+def run_server():
+    app.run(host="127.0.0.1", port=5055, debug=False)
 
-    def recv(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        rgb = img[:, :, ::-1]
-        result = self.hands.process(rgb)
+# ------------ VOLUME + HAND LOGIC ------------
+x1 = y1 = x2 = y2 = 0
 
-        if result.multi_hand_landmarks:
-            hand = result.multi_hand_landmarks[0]
-            mp_draw.draw_landmarks(img, hand)
+def set_volume_mac(volume):
+    volume = max(0, min(100, int(volume)))
+    subprocess.run(["amixer", "-D", "pulse", "sset", "Master", f"{volume}%"])
 
-            h, w, _ = img.shape
-            x1 = y1 = x2 = y2 = 0
 
-            for i, lm in enumerate(hand.landmark):
-                x, y = int(lm.x * w), int(lm.y * h)
-                if i == 8:
+my_hands = mp.solutions.hands.Hands()
+drawing_utils = mp.solutions.drawing_utils
+
+webcam = cv2.VideoCapture(0)
+
+prev_volume = 0
+smooth_factor = 0.5
+
+set_volume_mac(prev_volume)
+
+while True:
+    ret, image = webcam.read()
+    if not ret:
+        break
+
+    image = cv2.flip(image, 1)
+    frame_height, frame_width, _ = image.shape
+
+    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    output = my_hands.process(rgb_image)
+    hands = output.multi_hand_landmarks
+
+    if hands:
+        for hand in hands:
+            drawing_utils.draw_landmarks(image, hand)
+            landmarks = hand.landmark
+
+            for id, landmark in enumerate(landmarks):
+                x = int(landmark.x * frame_width)
+                y = int(landmark.y * frame_height)
+
+                if id == 8:   # index
                     x1, y1 = x, y
-                if i == 4:
+                if id == 4:   # thumb
                     x2, y2 = x, y
 
-            dist = np.hypot(x2 - x1, y2 - y1)
-            self.volume = int(np.clip((dist - 30) / 170 * 100, 0, 100))
+    dist = ((x2 - x1)**2 + (y2 - y1)**2) ** 0.5 // 4
 
-            img = cv2.line(img, (x1, y1), (x2, y2), (0, 255, 0), 3)
-            img = cv2.putText(
-                img,
-                f"Volume: {self.volume}%",
-                (20, 40),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (0, 0, 0),
-                3,
-            )
+    volume = max(0, min(100, (dist - 30) / (200 - 30) * 100))
 
-        return av.VideoFrame.from_ndarray(img, format="bgr24")
+    prev_volume += (volume - prev_volume) * smooth_factor
+    current_volume = prev_volume
 
-# --------- WebRTC Camera ----------
-ctx = webrtc_streamer(
-    key="gesture",
-    video_processor_factory=HandProcessor,
-    media_stream_constraints={"video": True, "audio": False},
-)
+    set_volume_mac(prev_volume)
 
-# --------- Audio Player ----------
-st.subheader("🎧 Test Audio")
+    cv2.putText(
+        image,
+        f"Volume: {int(prev_volume)}%",
+        (20, 50),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1,
+        (0, 0, 0),
+        4,
+    )
 
-audio_file = open("song.mp3", "rb")
-st.audio(audio_file.read(), format="audio/mp3")
+    cv2.line(image, (x1, y1), (x2, y2), (0, 255, 0), 5)
 
-if ctx.video_processor:
-    st.metric("Detected Volume", f"{ctx.video_processor.volume}%")
+
+
+    cv2.imshow("Gesture Control", image)
+
+    if cv2.waitKey(10) == 27:
+        break
+
+webcam.release()
+cv2.destroyAllWindows()
