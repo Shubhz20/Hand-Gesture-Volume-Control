@@ -19,7 +19,7 @@ x1 = y1 = x2 = y2 = 0
 
 def set_volume_mac(volume):
     volume = max(0, min(100, int(volume)))
-    subprocess.call(["osascript", "-e", f"set volume output volume {volume}"])
+    subprocess.run(["amixer", "-D", "pulse", "sset", "Master", f"{volume}%"])
 
 
 my_hands = mp.solutions.hands.Hands()
