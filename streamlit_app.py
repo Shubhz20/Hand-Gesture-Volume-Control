@@ -7,6 +7,12 @@ from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 
 # Title and description
 st.title("Hand Gesture Volume Control")
+st.markdown(
+    """*(Note: This app controls a virtual volume meter, not your system volume, due to browser security restrictions.)*"""
+)
+
+st.subheader("Test Music")
+st.audio("song.mp3")
 
 class GestureProcessor(VideoProcessorBase):
     def __init__(self):
