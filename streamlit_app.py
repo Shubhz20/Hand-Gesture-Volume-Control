@@ -1,10 +1,13 @@
+import os
+os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"
+os.environ["MESA_GL_VERSION_OVERRIDE"] = "3.3"
+
 import cv2
 import mediapipe as mp
 import numpy as np
 import streamlit as st
 import av
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, AudioProcessorBase, WebRtcMode
-from aiortc.contrib.media import MediaPlayer
 
 # Title and description
 st.title("Hand Gesture Volume Control")
@@ -159,10 +162,18 @@ class AudioVolumeProcessor(AudioProcessorBase):
                 layout=frame.layout.name
             )
 
+RTC_CONFIGURATION = {
+    "iceServers": [
+        {"urls": ["stun:stun.l.google.com:19302"]},
+        {"urls": ["stun:stun1.l.google.com:19302"]},
+        {"urls": ["stun:stun2.l.google.com:19302"]},
+    ]
+}
+
 webrtc_streamer(
     key="gesture-volume",
     mode=WebRtcMode.SENDRECV,
-    rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+    rtc_configuration=RTC_CONFIGURATION,
     video_processor_factory=GestureProcessor,
     audio_processor_factory=AudioVolumeProcessor,
     media_stream_constraints={
@@ -170,7 +181,7 @@ webrtc_streamer(
             "width": {"ideal": 320},
             "height": {"ideal": 240},
             "frameRate": {"ideal": 15}
-        }, 
+        },
         "audio": True
     },
     async_processing=True,
