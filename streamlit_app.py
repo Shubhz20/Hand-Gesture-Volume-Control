@@ -157,7 +157,9 @@ class AudioVolumeProcessor(AudioProcessorBase):
             # Safe multiplication for volume
             new_samples = (raw_samples * shared_state.volume).astype(np.int16)
 
-            new_frame = av.AudioFrame.from_ndarray(new_samples, layout="stereo")
+            # PyAV might have failed to upmix to stereo, so we derive layout dynamically
+            layout = "stereo" if new_samples.shape[0] == 2 else "mono"
+            new_frame = av.AudioFrame.from_ndarray(new_samples, layout=layout)
             new_frame.sample_rate = 48000
             new_frame.time_base = frame.time_base
             new_frame.pts = frame.pts
@@ -175,5 +177,4 @@ webrtc_streamer(
     audio_processor_factory=AudioVolumeProcessor,
     media_stream_constraints={"video": True, "audio": True},
     async_processing=True,
-    desired_playing_state=True,  # Auto-starts the camera on page load
 )
