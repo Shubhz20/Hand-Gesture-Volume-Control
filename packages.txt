@@ -1,1 +1,2 @@
-# No system packages needed - all processing is browser-side
+libgl1
+libglib2.0-dev
