@@ -23,6 +23,7 @@ st.markdown(
     """
 )
 
+
 # Shared state to communicate between Video and Audio processors
 class SharedState:
     def __init__(self):
@@ -64,9 +65,9 @@ def load_song_to_memory():
 
 preloaded_song = load_song_to_memory()
 if preloaded_song is not None:
-    st.success("✅ Music and AI Models loaded! Click Start below.")
+    st.success("Music and AI Models loaded. Starting camera...")
 else:
-    st.error("❌ Music failed to load. Please check if song.mp3 exists.")
+    st.error("Music failed to load. Please check if song.mp3 exists.")
 
 class GestureProcessor(VideoProcessorBase):
     def __init__(self):
@@ -170,4 +171,44 @@ webrtc_streamer(
     audio_processor_factory=AudioVolumeProcessor,
     media_stream_constraints={"video": True, "audio": True},
     async_processing=True,
+)
+
+# HTML Method: Auto-start the camera via a background JavaScript observer
+# This ensures a direct click command is sent the moment the button is ready.
+st.markdown(
+    """
+    <script>
+    const observer = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+                if (node.nodeType === 1) {
+                    const buttons = node.querySelectorAll('button');
+                    for (const btn of buttons) {
+                        if (btn.innerText === "Start") {
+                            btn.click();
+                            observer.disconnect();
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    observer.observe(window.parent.document.body, {
+        childList: true,
+        subtree: true
+    });
+    
+    // Also try an immediate check for slow loads
+    setTimeout(() => {
+        const buttons = window.parent.document.querySelectorAll("button");
+        for (const btn of buttons) {
+            if (btn.innerText === "Start") {
+                btn.click();
+            }
+        }
+    }, 2000);
+    </script>
+    """,
+    unsafe_allow_html=True
 )
