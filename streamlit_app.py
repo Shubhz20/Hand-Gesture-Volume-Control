@@ -1,14 +1,14 @@
 import os
 import sys
 import subprocess
-# try:
-#     import cv2
-# except ImportError:
-#     pass
+try:
+    import cv2
+except ImportError:
+    pass
 # Force headless mode to prevent Streamlit Cloud EGL context crashes
 subprocess.call([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python", "opencv-contrib-python"])
 subprocess.call([sys.executable, "-m", "pip", "install", "--no-cache-dir", "opencv-python-headless", "opencv-contrib-python-headless"])
-import cv2
+# import cv2
 import mediapipe as mp
 import numpy as np
 import streamlit as st
