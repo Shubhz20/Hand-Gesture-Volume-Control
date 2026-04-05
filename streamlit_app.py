@@ -9,18 +9,6 @@ import streamlit as st
 import av
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, AudioProcessorBase, WebRtcMode
 
-def get_ice_servers():
-    """Get Twilio TURN credentials from Streamlit secrets, or fall back to STUN only."""
-    try:
-        from twilio.rest import Client
-        account_sid = st.secrets["TWILIO_ACCOUNT_SID"]
-        auth_token  = st.secrets["TWILIO_AUTH_TOKEN"]
-        client = Client(account_sid, auth_token)
-        token  = client.tokens.create()
-        return token.ice_servers
-    except Exception:
-        # No Twilio credentials — STUN only (camera may not connect on cloud)
-        return [{"urls": ["stun:stun.l.google.com:19302"]}]
 
 # Title and description
 st.title("Hand Gesture Volume Control")
@@ -178,16 +166,11 @@ class AudioVolumeProcessor(AudioProcessorBase):
 webrtc_streamer(
     key="gesture-volume",
     mode=WebRtcMode.SENDRECV,
-    rtc_configuration={"iceServers": get_ice_servers()},
+    rtc_configuration={
+        "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+    },
     video_processor_factory=GestureProcessor,
     audio_processor_factory=AudioVolumeProcessor,
-    media_stream_constraints={
-        "video": {
-            "width": {"ideal": 320},
-            "height": {"ideal": 240},
-            "frameRate": {"ideal": 15}
-        },
-        "audio": True
-    },
+    media_stream_constraints={"video": True, "audio": True},
     async_processing=True,
 )

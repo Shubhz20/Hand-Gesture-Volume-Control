@@ -7,4 +7,3 @@ numpy
 av
 protobuf==3.20.3
 aiortc
-twilio
