@@ -1,152 +1,151 @@
+import os
+import cv2
+import mediapipe as mp
+import numpy as np
 import streamlit as st
+import av
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, AudioProcessorBase, WebRtcMode
 
-# HTML Method: Runs Hand Gesture Tracking 100% in the Browser
-st.set_page_config(page_title="Hand Gesture Volume Control", layout="centered")
+# Streamlit App Configuration
+st.info("Status: System ready. Connecting to camera...")
 
-st.title("Hand Gesture Volume Control")
-st.write("This professional version uses client-side AI for zero latency and high-speed gesture tracking.")
+# Shared state to communicate between Video and Audio processors
+class SharedState:
+    def __init__(self):
+        self.volume = 1.0
 
-# Client-side AI Logic (HTML/JS/CSS)
+if "shared_state" not in st.session_state:
+    st.session_state["shared_state"] = SharedState()
+shared_state = st.session_state["shared_state"]
+
+# Pre-load song into memory once to save CPU and reduce networking lag
+@st.cache_data
+def load_song_to_memory():
+    try:
+        container = av.open("song.mp3")
+        stream = container.streams.audio[0]
+        resampler = av.AudioResampler(format="s16", layout="stereo", rate=48000)
+        
+        frames = []
+        for packet in container.demux(stream):
+            for frame in packet.decode():
+                r_frames = resampler.resample(frame)
+                for r in r_frames:
+                    frames.append(r.to_ndarray())
+        
+        full_audio = np.concatenate(frames, axis=1)
+        if full_audio.shape[0] == 1:
+            full_audio = np.concatenate([full_audio, full_audio], axis=0)
+        return full_audio
+    except Exception as e:
+        st.error("Music file song.mp3 not found. Please upload one.")
+        return None
+
+preloaded_song = load_song_to_memory()
+
+# AI Gesture Processor Logic (Python)
+class GestureProcessor(VideoProcessorBase):
+    def __init__(self):
+        self.mp_hands = mp.solutions.hands
+        self.hands = self.mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=1,
+            model_complexity=0, # Use fastest model for cloud
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+        self.drawing_utils = mp.solutions.drawing_utils
+        self.prev_volume_pct = 50.0
+        self.smooth_factor = 0.3
+        self._frame_count = 0
+        self._last_landmarks = None
+
+    def recv(self, frame):
+        image = frame.to_ndarray(format="bgr24")
+        image = cv2.flip(image, 1)
+        frame_height, frame_width, _ = image.shape
+
+        self._frame_count += 1
+        # Skip 2 frames (process every 3rd) for cloud efficiency
+        if self._frame_count % 3 == 0:
+            small = cv2.resize(image, (160, 120))
+            rgb_small = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+            output = self.hands.process(rgb_small)
+            self._last_landmarks = output.multi_hand_landmarks
+
+        if self._last_landmarks:
+            for hand in self._last_landmarks:
+                self.drawing_utils.draw_landmarks(image, hand)
+                landmarks = hand.landmark
+                thumb, index = landmarks[4], landmarks[8]
+                x1, y1 = int(index.x * frame_width), int(index.y * frame_height)
+                x2, y2 = int(thumb.x * frame_width), int(thumb.y * frame_height)
+                
+                cv2.line(image, (x1, y1), (x2, y2), (0, 255, 0), 4)
+                dist = ((x2 - x1)**2 + (y2 - y1)**2) ** 0.5 // 4
+                target_vol = max(0, min(100, (dist - 20) / (150 - 20) * 100))
+                self.prev_volume_pct += (target_vol - self.prev_volume_pct) * self.smooth_factor
+                shared_state.volume = self.prev_volume_pct / 100.0
+
+        bar_x, bar_y, bar_w, bar_h = 20, 70, 20, 150
+        filled = int(bar_h * self.prev_volume_pct / 100)
+        cv2.rectangle(image, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (200, 200, 200), -1)
+        cv2.rectangle(image, (bar_x, bar_y + bar_h - filled), (bar_x + bar_w, bar_y + bar_h), (0, 200, 100), -1)
+        cv2.putText(image, f"Vol: {int(self.prev_volume_pct)}%", (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+        return av.VideoFrame.from_ndarray(image, format="bgr24")
+
+class AudioVolumeProcessor(AudioProcessorBase):
+    def __init__(self):
+        self.song_idx = 0
+
+    def recv(self, frame):
+        samples_needed = frame.samples
+        if preloaded_song is None or samples_needed <= 0:
+            return av.AudioFrame.from_ndarray(np.zeros((2, max(samples_needed, 480)), dtype=np.int16), layout="stereo")
+
+        end_idx = self.song_idx + samples_needed
+        if end_idx > preloaded_song.shape[1]:
+            self.song_idx = 0
+            end_idx = samples_needed
+            
+        raw_samples = preloaded_song[:, self.song_idx : end_idx]
+        self.song_idx = end_idx
+        new_samples = (raw_samples * shared_state.volume).astype(np.int16)
+        
+        new_frame = av.AudioFrame.from_ndarray(new_samples, layout="stereo" if new_samples.shape[0] == 2 else "mono")
+        new_frame.sample_rate = 48000
+        new_frame.time_base, new_frame.pts = frame.time_base, frame.pts
+        return new_frame
+
+# The main WebRTC launcher
+webrtc_streamer(
+    key="gesture-volume-control",
+    mode=WebRtcMode.SENDRECV,
+    rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+    video_processor_factory=GestureProcessor,
+    audio_processor_factory=AudioVolumeProcessor,
+    async_processing=True,
+    media_stream_constraints={"video": True, "audio": True}
+)
+
+# HTML Method: High-reliability Auto-start script
 st.markdown(
     """
-    <div id="app_frame" style="position: relative; width: 640px; height: 480px; margin: auto; background: #1a1a1a; border-radius: 16px; overflow: hidden; border: 4px solid #333; box-shadow: 0 10px 40px rgba(0,0,0,0.6);">
-        <video id="input_video" style="display: none;" playsinline></video>
-        <canvas id="output_canvas" width="640" height="480" style="width: 100%; height: 100%; transform: scaleX(-1);"></canvas>
-        
-        <!-- Volume UI Overlay -->
-        <div style="position: absolute; right: 30px; top: 50%; transform: translateY(-50%); width: 35px; height: 260px; background: rgba(0,0,0,0.3); border: 2px solid rgba(255,255,255,0.4); border-radius: 20px; padding: 4px; backdrop-filter: blur(5px);">
-             <div id="vol_fill" style="position: absolute; bottom: 0; left: 0; width: 100%; height: 50%; background: linear-gradient(to top, #00ff88, #00ffee); border-radius: 15px; transition: height 0.1s; box-shadow: 0 0 15px rgba(0,255,136,0.6);"></div>
-        </div>
-        <div id="vol_label" style="position: absolute; right: 15px; top: 15%; color: #fff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-weight: bold; background: rgba(0,255,136,0.2); padding: 5px 12px; border-radius: 8px; border: 1px solid #00ff88;">Vol: 50%</div>
-
-        <div id="loading_screen" style="position: absolute; inset: 0; background: #1a1a1a; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 50;">
-            <div style="width: 50px; height: 50px; border: 5px solid #333; border-top: 5px solid #00ff88; border-radius: 50%; animation: spin 1s linear infinite;"></div>
-            <p id="load_text" style="color: #fff; margin-top: 20px; font-family: sans-serif;">Loading AI Engine...</p>
-        </div>
-
-        <button id="start_button" style="position: absolute; left: 50%; top: 55%; transform: translate(-50%, -50%); padding: 18px 45px; font-size: 22px; background: #00ff88; color: #000; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; box-shadow: 0 8px 25px rgba(0,255,136,0.4); display: none; z-index: 60; transition: transform 0.2s;">START PROJECT</button>
-        
-        <audio id="audio_element" loop crossorigin="anonymous">
-            <source src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" type="audio/mpeg">
-        </audio>
-    </div>
-
-    <style>
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        #start_button:hover { transform: translate(-50%, -55%) scale(1.05); background: #00ffa2; }
-    </style>
-
-    <!-- MediaPipe Libraries -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-
     <script>
-    const video = document.getElementById('input_video');
-    const canvas = document.getElementById('output_canvas');
-    const ctx = canvas.getContext('2d');
-    const audio = document.getElementById('audio_element');
-    const startBtn = document.getElementById('start_button');
-    const loadScreen = document.getElementById('loading_screen');
-    const loadText = document.getElementById('load_text');
-    const volFill = document.getElementById('vol_fill');
-    const volLabel = document.getElementById('vol_label');
-
-    let currentVolume = 0.5;
-    audio.volume = currentVolume;
-
-    function onResults(results) {
-        ctx.save();
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
-        
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            const landmarks = results.multiHandLandmarks[0];
-            
-            // Scaled Drawing utils
-            if (window.drawConnectors) {
-                window.drawConnectors(ctx, landmarks, window.HAND_CONNECTIONS, {color: '#00FF88', lineWidth: 5});
-                window.drawLandmarks(ctx, landmarks, {color: '#FF3B30', lineWidth: 1, radius: 4});
-            }
-
-            const index = landmarks[8];
-            const thumb = landmarks[4];
-            const dx = (index.x - thumb.x) * canvas.width;
-            const dy = (index.y - thumb.y) * canvas.height;
-            const dist = Math.sqrt(dx*dx + dy*dy);
-
-            let vol = (dist - 40) / (220 - 40);
-            vol = Math.max(0, Math.min(1, vol));
-            currentVolume += (vol - currentVolume) * 0.25;
-            audio.volume = currentVolume;
-
-            const pct = Math.round(currentVolume * 100);
-            volFill.style.height = pct + '%';
-            volLabel.innerText = 'Vol: ' + pct + '%';
-
-            ctx.beginPath();
-            ctx.moveTo(thumb.x * canvas.width, thumb.y * canvas.height);
-            ctx.lineTo(index.x * canvas.width, index.y * canvas.height);
-            ctx.strokeStyle = '#FFFFFF';
-            ctx.lineWidth = 4;
-            ctx.stroke();
+    const clickStart = () => {
+        const buttons = Array.from(window.parent.document.querySelectorAll("button"));
+        const btn = buttons.find(b => b.innerText && b.innerText.trim().toLowerCase() === "start");
+        if (btn) {
+            btn.click();
+            console.log("Success: Auto-started the camera.");
+            return true;
         }
-        ctx.restore();
-    }
-
-    // Wait for libraries to be ready
-    const checkInterval = setInterval(() => {
-        if (typeof Hands !== 'undefined' && typeof Camera !== 'undefined') {
-            clearInterval(checkInterval);
-            loadText.innerText = 'Ready to launch';
-            startBtn.style.display = 'block';
-        }
-    }, 500);
-
-    async function init() {
-        startBtn.style.display = 'none';
-        loadScreen.style.display = 'none';
-
-        const hands = new Hands({locateFile: (file) => {
-            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-        }});
-        
-        hands.setOptions({
-            maxNumHands: 1,
-            modelComplexity: 1,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5
-        });
-        hands.onResults(onResults);
-
-        const camera = new Camera(video, {
-            onFrame: async () => { await hands.send({image: video}); },
-            width: 640,
-            height: 480
-        });
-
-        try {
-            await audio.play();
-            await camera.start();
-        } catch (e) {
-            alert('Camera Permission Error: Please allow camera access in your browser bar.');
-            console.error(e);
-            loadScreen.style.display = 'flex';
-            loadText.innerText = 'Permission Denied';
-        }
-    }
-
-    startBtn.addEventListener('click', init);
+        return false;
+    };
+    const interval = setInterval(() => { if (clickStart()) clearInterval(interval); }, 1000);
+    setTimeout(() => clearInterval(interval), 40000); // Stop looking after 40 seconds
     </script>
     """,
     unsafe_allow_html=True
 )
-
-st.write("---")
-
-# ---------------------------------------------------------
-# ARCHIVED CODE BASE (STAYING COMMENTED OUT PER REQUEST)
-# ---------------------------------------------------------
-# # class SharedState: ... 
-# # def load_song_to_memory(): ...
-# # webrtc_streamer(key="gesture-volume", ...)
