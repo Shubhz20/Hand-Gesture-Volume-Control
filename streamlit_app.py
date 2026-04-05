@@ -9,6 +9,19 @@ import streamlit as st
 import av
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, AudioProcessorBase, WebRtcMode
 
+def get_ice_servers():
+    """Get Twilio TURN credentials from Streamlit secrets, or fall back to STUN only."""
+    try:
+        from twilio.rest import Client
+        account_sid = st.secrets["TWILIO_ACCOUNT_SID"]
+        auth_token  = st.secrets["TWILIO_AUTH_TOKEN"]
+        client = Client(account_sid, auth_token)
+        token  = client.tokens.create()
+        return token.ice_servers
+    except Exception:
+        # No Twilio credentials — STUN only (camera may not connect on cloud)
+        return [{"urls": ["stun:stun.l.google.com:19302"]}]
+
 # Title and description
 st.title("Hand Gesture Volume Control")
 st.markdown(
@@ -162,35 +175,10 @@ class AudioVolumeProcessor(AudioProcessorBase):
                 layout=frame.layout.name
             )
 
-RTC_CONFIGURATION = {
-    "iceServers": [
-        # STUN
-        {"urls": ["stun:stun.l.google.com:19302"]},
-        # FreeTURN — reliable free relay
-        {
-            "urls": ["turn:freeturn.net:3478"],
-            "username": "free",
-            "credential": "free",
-        },
-        {
-            "urls": ["turns:freeturn.net:5349"],
-            "username": "free",
-            "credential": "free",
-        },
-        # OpenRelay as backup — TCP on 443 bypasses most firewalls
-        {
-            "urls": ["turn:openrelay.metered.ca:443?transport=tcp"],
-            "username": "openrelayproject",
-            "credential": "openrelayproject",
-        },
-    ],
-    "iceTransportPolicy": "all",
-}
-
 webrtc_streamer(
     key="gesture-volume",
     mode=WebRtcMode.SENDRECV,
-    rtc_configuration=RTC_CONFIGURATION,
+    rtc_configuration={"iceServers": get_ice_servers()},
     video_processor_factory=GestureProcessor,
     audio_processor_factory=AudioVolumeProcessor,
     media_stream_constraints={
