@@ -175,4 +175,5 @@ webrtc_streamer(
     audio_processor_factory=AudioVolumeProcessor,
     media_stream_constraints={"video": True, "audio": True},
     async_processing=True,
+    desired_playing_state=True,  # Auto-starts the camera on page load
 )
