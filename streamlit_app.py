@@ -129,7 +129,10 @@ class AudioVolumeProcessor(AudioProcessorBase):
 
                 samples_needed = frame.samples
                 
-                while self.fifo.samples < samples_needed:
+                max_loops = 5
+                loops = 0
+                while self.fifo.samples < samples_needed and loops < max_loops:
+                    loops += 1
                     try:
                         song_frame = next(self.packet_generator)
                     except StopIteration:
@@ -141,7 +144,8 @@ class AudioVolumeProcessor(AudioProcessorBase):
 
                     resampled_frames = self.resampler.resample(song_frame)
                     if resampled_frames:
-                        self.fifo.write(resampled_frames[0])
+                        for r_frame in resampled_frames:
+                            self.fifo.write(r_frame)
 
                 if self.fifo.samples >= samples_needed:
                     output_frame = self.fifo.read(samples_needed)
