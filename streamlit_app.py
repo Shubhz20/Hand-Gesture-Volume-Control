@@ -1,118 +1,139 @@
 import streamlit as st
-import streamlit.components.v1 as components
 
 # HTML Method: Runs Hand Gesture Tracking 100% in the Browser
-# This bypasses all networking and server CPU issues. 
-st.title("Hand Gesture Volume Control")
-st.markdown("This version runs entirely in your browser using the **HTML Method** for maximum speed and zero lag.")
-st.info("Instructions: 1. Click Start. 2. Allow camera access. 3. Pinch index and thumb to change music volume.")
+# Note: Using st.markdown with unsafe_allow_html=True to bypass iframe camera permission blocks.
+st.set_page_config(page_title="Hand Gesture Volume Control", layout="centered")
 
-components.html(
+st.title("Hand Gesture Volume Control")
+st.write("This version runs entirely in your browser using the HTML Method (client-side AI) to solve connectivity errors.")
+
+# Client-side AI Logic (HTML/JS/CSS)
+st.markdown(
     \"\"\"
-    <div id="container" style="position: relative; width: 640px; height: 480px; margin: auto; background: #000; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
+    <div id="cam_container" style="position: relative; width: 640px; height: 480px; margin: auto; background: #000; border-radius: 12px; overflow: hidden; box-shadow: 0 8px 30px rgba(0,0,0,0.5);">
         <video id="input_video" style="display: none;" playsinline></video>
         <canvas id="output_canvas" width="640" height="480" style="width: 100%; height: 100%; transform: scaleX(-1);"></canvas>
-        <div id="vol_bar_bg" style="position: absolute; right: 30px; top: 140px; width: 25px; height: 200px; background: rgba(255,255,255,0.2); border: 2px solid #fff; border-radius: 5px;"></div>
-        <div id="vol_bar_fill" style="position: absolute; right: 30px; bottom: 140px; width: 25px; height: 100px; background: #00ff88; border-radius: 3px; transition: height 0.1s;"></div>
-        <div id="vol_text" style="position: absolute; right: 15px; top: 110px; color: #fff; font-family: sans-serif; font-weight: bold; text-shadow: 1px 1px 2px #000;">Vol: 50%</div>
         
-        <audio id="bg_music" loop crossorigin="anonymous">
+        <!-- Volume UI Overlay -->
+        <div style="position: absolute; right: 30px; top: 120px; width: 30px; height: 240px; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.5); border-radius: 15px; padding: 3px;">
+             <div id="vol_fill" style="position: absolute; bottom: 0; left: 0; width: 100%; height: 50%; background: #00ff88; border-radius: 10px; transition: height 0.1s;"></div>
+        </div>
+        <div id="vol_label" style="position: absolute; right: 20px; top: 90px; color: #fff; font-family: monospace; font-weight: bold; background: rgba(0,0,0,0.5); padding: 2px 5px; border-radius: 4px;">Vol: 50%</div>
+
+        <button id="start_button" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 20px 40px; font-size: 20px; background: #00ff88; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 10px rgba(0,255,136,0.5); z-index: 10;">Start Camera</button>
+        <div id="status_msg" style="position: absolute; width: 100%; bottom: 20px; text-align: center; color: #fff; font-family: sans-serif; pointer-events: none; text-shadow: 1px 1px 2px #000;">Ready</div>
+        
+        <audio id="audio_element" loop crossorigin="anonymous">
             <source src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" type="audio/mpeg">
         </audio>
-        
-        <button id="start_btn" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 20px 40px; font-size: 20px; cursor: pointer; background: #00ff88; border: none; border-radius: 8px; font-weight: bold; color: #000; z-index: 100;">Start Camera and Music</button>
-        <div id="loading_msg" style="position: absolute; left: 50%; top: 60%; transform: translate(-50%, -50%); color: #fff; display: none; font-family: sans-serif;">Loading AI Models...</div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <!-- MediaPipe Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
 
     <script>
-    const videoElement = document.getElementById('input_video');
-    const canvasElement = document.getElementById('output_canvas');
-    const canvasCtx = canvasElement.getContext('2d');
-    const audio = document.getElementById('bg_music');
-    const startBtn = document.getElementById('start_btn');
-    const loadingMsg = document.getElementById('loading_msg');
-    const volFill = document.getElementById('vol_bar_fill');
-    const volText = document.getElementById('vol_text');
+    const video = document.getElementById('input_video');
+    const canvas = document.getElementById('output_canvas');
+    const ctx = canvas.getContext('2d');
+    const audio = document.getElementById('audio_element');
+    const startBtn = document.getElementById('start_button');
+    const statusMsg = document.getElementById('status_msg');
+    const volFill = document.getElementById('vol_fill');
+    const volLabel = document.getElementById('vol_label');
 
-    let currentVol = 0.5;
-    audio.volume = currentVol;
+    let currentVolume = 0.5;
+    audio.volume = currentVolume;
 
     function onResults(results) {
-        canvasCtx.save();
-        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+        ctx.save();
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
         
-        if (results.multiHandLandmarks) {
-            for (const landmarks of results.multiHandLandmarks) {
-                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
-                drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2});
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            const landmarks = results.multiHandLandmarks[0];
+            
+            // Draw Hand Connections
+            window.drawConnectors(ctx, landmarks, window.HAND_CONNECTIONS, {color: '#00FF88', lineWidth: 4});
+            window.drawLandmarks(ctx, landmarks, {color: '#FF3B30', lineWidth: 1, radius: 3});
 
-                const index = landmarks[8];
-                const thumb = landmarks[4];
+            // Index Tip (8) and Thumb Tip (4)
+            const index = landmarks[8];
+            const thumb = landmarks[4];
 
-                const dx = (index.x - thumb.x) * canvasElement.width;
-                const dy = (index.y - thumb.y) * canvasElement.height;
-                const distance = Math.sqrt(dx*dx + dy*dy);
+            // Distance in screen pixels
+            const dx = (index.x - thumb.x) * canvas.width;
+            const dy = (index.y - thumb.y) * canvas.height;
+            const dist = Math.sqrt(dx*dx + dy*dy);
 
-                let vol = (distance - 30) / (180 - 30);
-                vol = Math.max(0, Math.min(1, vol));
-                
-                currentVol += (vol - currentVol) * 0.3;
-                audio.volume = currentVol;
+            // Volume Scaling (min 30px, max 200px)
+            let vol = (dist - 30) / (200 - 30);
+            vol = Math.max(0, Math.min(1, vol));
+            
+            // Smoothing
+            currentVolume += (vol - currentVolume) * 0.2;
+            audio.volume = currentVolume;
 
-                const volPct = Math.round(currentVol * 100);
-                volFill.style.height = (volPct * 2) + 'px';
-                volText.innerText = 'Vol: ' + volPct + '%';
+            // Update Overlay
+            const pct = Math.round(currentVolume * 100);
+            volFill.style.height = pct + '%';
+            volLabel.innerText = 'Vol: ' + pct + '%';
 
-                canvasCtx.beginPath();
-                canvasCtx.moveTo(thumb.x * canvasElement.width, thumb.y * canvasElement.height);
-                canvasCtx.lineTo(index.x * canvasElement.width, index.y * canvasElement.height);
-                canvasCtx.strokeStyle = '#fff';
-                canvasCtx.lineWidth = 4;
-                canvasCtx.stroke();
-            }
+            // Draw connecting line between fingers
+            ctx.beginPath();
+            ctx.moveTo(thumb.x * canvas.width, thumb.y * canvas.height);
+            ctx.lineTo(index.x * canvas.width, index.y * canvas.height);
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 3;
+            ctx.stroke();
         }
-        canvasCtx.restore();
+        ctx.restore();
     }
 
-    const hands = new Hands({locateFile: (file) => {
-        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-    }});
-    hands.setOptions({
-        maxNumHands: 1,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-    });
-    hands.onResults(onResults);
-
-    const camera = new Camera(videoElement, {
-        onFrame: async () => {
-            await hands.send({image: videoElement});
-        },
-        width: 640,
-        height: 480
-    });
-
-    startBtn.onclick = async () => {
+    async function init() {
         startBtn.style.display = 'none';
-        loadingMsg.style.display = 'block';
+        statusMsg.innerText = 'Initalizing AI...';
+
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+        
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        
+        hands.onResults(onResults);
+
+        const camera = new Camera(video, {
+            onFrame: async () => {
+                await hands.send({image: video});
+            },
+            width: 640,
+            height: 480
+        });
+
+        statusMsg.innerText = 'Starting Camera...';
         try {
             await audio.play();
             await camera.start();
-            loadingMsg.style.display = 'none';
-        } catch (err) {
-            alert("Error starting camera: " + err);
+            statusMsg.innerText = 'Running Locally (Zero Lag)';
+        } catch (e) {
+            statusMsg.innerText = 'Error: ' + e.message;
+            startBtn.style.display = 'block';
         }
-    };
+    }
+
+    startBtn.addEventListener('click', init);
     </script>
     \"\"\",
-    height=550,
+    unsafe_allow_html=True
 )
+
+st.write("---")
 
 # ---------------------------------------------------------
 # COMMENTED OUT PYTHON CODE BASE (ARCHIVED)
