@@ -1,3 +1,13 @@
+import os
+import sys
+import subprocess
+try:
+    import cv2
+except ImportError:
+    pass
+# Force headless mode to prevent Streamlit Cloud EGL context crashes
+subprocess.call([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python", "opencv-contrib-python"])
+subprocess.call([sys.executable, "-m", "pip", "install", "--no-cache-dir", "opencv-python-headless", "opencv-contrib-python-headless"])
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -157,5 +167,13 @@ webrtc_streamer(
     rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
     video_processor_factory=GestureProcessor,
     audio_processor_factory=AudioVolumeProcessor,
-    media_stream_constraints={"video": True, "audio": True}, # Request Mic!
+    media_stream_constraints={
+        "video": {
+            "width": {"ideal": 320},
+            "height": {"ideal": 240},
+            "frameRate": {"ideal": 15}
+        }, 
+        "audio": True
+    },
+    async_processing=True,
 )
