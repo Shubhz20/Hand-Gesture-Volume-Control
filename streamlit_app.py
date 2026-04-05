@@ -100,7 +100,7 @@ class GestureProcessor(VideoProcessorBase):
 # --- PRELOAD SONG ONCE INTO MEMORY TO SAVE CPU ---
 @st.cache_data
 def load_song_to_memory():
-    print("Pre-decoding full song into RAM to prevent thread starvation...")
+    print("Pre-decoding full song into RAM...")
     try:
         container = av.open("song.mp3")
         stream = container.streams.audio[0]
@@ -113,15 +113,24 @@ def load_song_to_memory():
                 r_frames = resampler.resample(frame)
                 for r in r_frames:
                     frames.append(r.to_ndarray())
-        # Concatenate all frames along the time axis (axis=1)
+        
         full_audio = np.concatenate(frames, axis=1)
+        
+        # FORCE STEREO: If the decoded shape is (1, N), duplicate to (2, N)
+        if full_audio.shape[0] == 1:
+            full_audio = np.concatenate([full_audio, full_audio], axis=0)
+            
         print(f"Song loaded! Shape: {full_audio.shape}")
         return full_audio
     except Exception as e:
-        print("Error pre-loading song:", e)
+        st.error(f"Failed to load song.mp3: {e}")
         return None
 
 preloaded_song = load_song_to_memory()
+if preloaded_song is not None:
+    st.success("✅ Music and AI Models loaded! Click Start below.")
+else:
+    st.error("❌ Music failed to load. Please check if song.mp3 exists.")
 
 class AudioVolumeProcessor(AudioProcessorBase):
     def __init__(self):
