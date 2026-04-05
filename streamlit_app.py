@@ -1,4 +1,15 @@
-import cv2
+import os
+import sys
+import subprocess
+
+# Hack to fix Streamlit Cloud missing libGL / libgthread due to mediapipe downloading opencv-contrib-python
+try:
+    import cv2
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python", "opencv-contrib-python"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--no-cache-dir", "opencv-python-headless"])
+    import cv2
+
 import mediapipe as mp
 import numpy as np
 import streamlit as st
