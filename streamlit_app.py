@@ -6,8 +6,8 @@ import subprocess
 try:
     import cv2
 except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python", "opencv-contrib-python"])
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--no-cache-dir", "opencv-python-headless"])
+    subprocess.call([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python", "opencv-contrib-python"])
+    subprocess.call([sys.executable, "-m", "pip", "install", "--no-cache-dir", "opencv-python-headless", "opencv-contrib-python-headless"])
     import cv2
 
 import mediapipe as mp
