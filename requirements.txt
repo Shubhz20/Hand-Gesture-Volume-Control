@@ -1,9 +1,1 @@
 streamlit
-streamlit-webrtc
-opencv-python-headless
-opencv-contrib-python-headless
-mediapipe==0.10.9
-numpy
-av
-protobuf==3.20.3
-aiortc
