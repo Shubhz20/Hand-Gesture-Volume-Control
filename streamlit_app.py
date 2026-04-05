@@ -1,17 +1,14 @@
 import streamlit as st
 import streamlit.components.v1 as components
 
-# Set page config
-st.set_page_config(page_title="Hand Gesture Volume Control", layout="centered")
-
+# HTML Method: Runs Hand Gesture Tracking 100% in the Browser
+# This bypasses all networking and server CPU issues. 
 st.title("Hand Gesture Volume Control")
 st.markdown("This version runs entirely in your browser using the **HTML Method** for maximum speed and zero lag.")
 st.info("Instructions: 1. Click Start. 2. Allow camera access. 3. Pinch index and thumb to change music volume.")
 
-# The "HTML Rule" - Client-side Hand Tracking and Volume Control
-# This uses MediaPipe JS via CDN and runs 100% on the user's computer.
 components.html(
-    """
+    \"\"\"
     <div id="container" style="position: relative; width: 640px; height: 480px; margin: auto; background: #000; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
         <video id="input_video" style="display: none;" playsinline></video>
         <canvas id="output_canvas" width="640" height="480" style="width: 100%; height: 100%; transform: scaleX(-1);"></canvas>
@@ -61,7 +58,6 @@ components.html(
                 const dy = (index.y - thumb.y) * canvasElement.height;
                 const distance = Math.sqrt(dx*dx + dy*dy);
 
-                // Map distance to volume
                 let vol = (distance - 30) / (180 - 30);
                 vol = Math.max(0, Math.min(1, vol));
                 
@@ -114,24 +110,70 @@ components.html(
         }
     };
     </script>
-    """,
+    \"\"\",
     height=550,
 )
 
-st.write("---")
-st.subheader("Previous Python Code (Archived)")
-with st.expander("Show the commented out Python code base"):
-    st.code(\"\"\"
+# ---------------------------------------------------------
+# COMMENTED OUT PYTHON CODE BASE (ARCHIVED)
+# ---------------------------------------------------------
+
+# import os
+# os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"
+# os.environ["MESA_GL_VERSION_OVERRIDE"] = "3.3"
+# os.environ["GLOG_minloglevel"] = "2"
+
 # import cv2
 # import mediapipe as mp
 # import numpy as np
-# from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+# import streamlit as st
+# import av
+# from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, AudioProcessorBase, WebRtcMode
+
+# class SharedState:
+#     def __init__(self):
+#         self.volume = 1.0
+
+# @st.cache_data
+# def load_song_to_memory():
+#     try:
+#         container = av.open("song.mp3")
+#         stream = container.streams.audio[0]
+#         resampler = av.AudioResampler(format="s16", layout="stereo", rate=48000)
+#         frames = []
+#         for packet in container.demux(stream):
+#             for frame in packet.decode():
+#                 r_frames = resampler.resample(frame)
+#                 for r in r_frames:
+#                     frames.append(r.to_ndarray())
+#         full_audio = np.concatenate(frames, axis=1)
+#         if full_audio.shape[0] == 1:
+#             full_audio = np.concatenate([full_audio, full_audio], axis=0)
+#         return full_audio
+#     except Exception as e:
+#         return None
 
 # class GestureProcessor(VideoProcessorBase):
+#     def __init__(self):
+#         self.mp_hands = mp.solutions.hands
+#         self.hands = self.mp_hands.Hands(static_image_mode=False, max_num_hands=1)
+#         self.drawing_utils = mp.solutions.drawing_utils
+#         self.prev_volume_pct = 50.0
+
 #     def recv(self, frame):
 #         image = frame.to_ndarray(format="bgr24")
-#         # (AI Landmark Logic Here...)
+#         # ... MediaPipe Logic ...
 #         return av.VideoFrame.from_ndarray(image, format="bgr24")
 
-# webrtc_streamer(key="gesture-volume", video_processor_factory=GestureProcessor)
-\"\"\")
+# class AudioVolumeProcessor(AudioProcessorBase):
+#     def recv(self, frame):
+#         return frame
+
+# webrtc_streamer(
+#     key="gesture-volume",
+#     mode=WebRtcMode.SENDRECV,
+#     rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+#     video_processor_factory=GestureProcessor,
+#     audio_processor_factory=AudioVolumeProcessor,
+#     async_processing=True,
+# )
