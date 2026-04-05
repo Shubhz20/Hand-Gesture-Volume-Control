@@ -1,151 +1,171 @@
 import os
+import sys
+import subprocess
+try:
+    import cv2
+except ImportError:
+    pass
+# Force headless mode to prevent Streamlit Cloud EGL context crashes
+subprocess.call([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python", "opencv-contrib-python"])
+subprocess.call([sys.executable, "-m", "pip", "install", "--no-cache-dir", "opencv-python-headless", "opencv-contrib-python-headless"])
 import cv2
 import mediapipe as mp
 import numpy as np
 import streamlit as st
 import av
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, AudioProcessorBase, WebRtcMode
+from aiortc.contrib.media import MediaPlayer
 
-# Streamlit App Configuration
-st.info("Status: System ready. Connecting to camera...")
+# Title and description
+st.title("Hand Gesture Volume Control")
+st.markdown(
+    """
+    **Instructions:**
+    1. Click "Start" to open the camera and play music.
+    2. Show your hand. Pinch thumb and index finger to change volume.
+    3. The music is streamed from the server and volume is applied in real-time Python code!
+    """
+)
 
 # Shared state to communicate between Video and Audio processors
 class SharedState:
     def __init__(self):
-        self.volume = 1.0
+        self.volume = 1.0  # 0.0 to 1.0
 
 if "shared_state" not in st.session_state:
     st.session_state["shared_state"] = SharedState()
+
 shared_state = st.session_state["shared_state"]
 
-# Pre-load song into memory once to save CPU and reduce networking lag
-@st.cache_data
-def load_song_to_memory():
-    try:
-        container = av.open("song.mp3")
-        stream = container.streams.audio[0]
-        resampler = av.AudioResampler(format="s16", layout="stereo", rate=48000)
-        
-        frames = []
-        for packet in container.demux(stream):
-            for frame in packet.decode():
-                r_frames = resampler.resample(frame)
-                for r in r_frames:
-                    frames.append(r.to_ndarray())
-        
-        full_audio = np.concatenate(frames, axis=1)
-        if full_audio.shape[0] == 1:
-            full_audio = np.concatenate([full_audio, full_audio], axis=0)
-        return full_audio
-    except Exception as e:
-        st.error("Music file song.mp3 not found. Please upload one.")
-        return None
-
-preloaded_song = load_song_to_memory()
-
-# AI Gesture Processor Logic (Python)
 class GestureProcessor(VideoProcessorBase):
     def __init__(self):
         self.mp_hands = mp.solutions.hands
         self.hands = self.mp_hands.Hands(
-            static_image_mode=False,
-            max_num_hands=1,
-            model_complexity=0, # Use fastest model for cloud
+            model_complexity=0,
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5
         )
         self.drawing_utils = mp.solutions.drawing_utils
-        self.prev_volume_pct = 50.0
+        self.prev_volume_pct = 50.0 # 0-100 scale for display
         self.smooth_factor = 0.3
-        self._frame_count = 0
-        self._last_landmarks = None
 
     def recv(self, frame):
         image = frame.to_ndarray(format="bgr24")
+        
+        # Mirror and process
         image = cv2.flip(image, 1)
         frame_height, frame_width, _ = image.shape
+        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        output = self.hands.process(rgb_image)
+        hands_landmarks = output.multi_hand_landmarks
 
-        self._frame_count += 1
-        # Skip 2 frames (process every 3rd) for cloud efficiency
-        if self._frame_count % 3 == 0:
-            small = cv2.resize(image, (160, 120))
-            rgb_small = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
-            output = self.hands.process(rgb_small)
-            self._last_landmarks = output.multi_hand_landmarks
-
-        if self._last_landmarks:
-            for hand in self._last_landmarks:
+        x1 = y1 = x2 = y2 = 0
+        
+        if hands_landmarks:
+            for hand in hands_landmarks:
                 self.drawing_utils.draw_landmarks(image, hand)
                 landmarks = hand.landmark
-                thumb, index = landmarks[4], landmarks[8]
-                x1, y1 = int(index.x * frame_width), int(index.y * frame_height)
-                x2, y2 = int(thumb.x * frame_width), int(thumb.y * frame_height)
                 
-                cv2.line(image, (x1, y1), (x2, y2), (0, 255, 0), 4)
+                thumb = landmarks[4]
+                index = landmarks[8]
+                
+                x1 = int(index.x * frame_width)
+                y1 = int(index.y * frame_height)
+                x2 = int(thumb.x * frame_width)
+                y2 = int(thumb.y * frame_height)
+
+                cv2.line(image, (x1, y1), (x2, y2), (0, 255, 0), 5)
+                
+                # Distance calculation
                 dist = ((x2 - x1)**2 + (y2 - y1)**2) ** 0.5 // 4
+                
+                # Calculate target volume (0-100)
                 target_vol = max(0, min(100, (dist - 20) / (150 - 20) * 100))
+                
+                # Smoothing
                 self.prev_volume_pct += (target_vol - self.prev_volume_pct) * self.smooth_factor
+                
+                # Update shared state (0.0 - 1.0)
                 shared_state.volume = self.prev_volume_pct / 100.0
 
-        bar_x, bar_y, bar_w, bar_h = 20, 70, 20, 150
-        filled = int(bar_h * self.prev_volume_pct / 100)
-        cv2.rectangle(image, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (200, 200, 200), -1)
-        cv2.rectangle(image, (bar_x, bar_y + bar_h - filled), (bar_x + bar_w, bar_y + bar_h), (0, 200, 100), -1)
-        cv2.putText(image, f"Vol: {int(self.prev_volume_pct)}%", (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        # Display Volume
+        cv2.putText(
+            image,
+            f"Volume: {int(self.prev_volume_pct)}%",
+            (20, 50),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0, 0, 0),
+            4,
+        )
 
         return av.VideoFrame.from_ndarray(image, format="bgr24")
 
 class AudioVolumeProcessor(AudioProcessorBase):
     def __init__(self):
-        self.song_idx = 0
+        self.container = av.open("song.mp3")
+        self.stream = self.container.streams.audio[0]
+        self.packet_generator = self.container.decode(self.stream)
+        self.resampler = None
+        self.fifo = av.AudioFifo()
 
-    def recv(self, frame):
+    def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
+        # Initialize resampler once we know the target format from the first incoming frame
+        if self.resampler is None:
+            self.resampler = av.AudioResampler(
+                format=frame.format.name,
+                layout=frame.layout.name,
+                rate=frame.sample_rate,
+            )
+
         samples_needed = frame.samples
-        if preloaded_song is None or samples_needed <= 0:
-            return av.AudioFrame.from_ndarray(np.zeros((2, max(samples_needed, 480)), dtype=np.int16), layout="stereo")
-
-        end_idx = self.song_idx + samples_needed
-        if end_idx > preloaded_song.shape[1]:
-            self.song_idx = 0
-            end_idx = samples_needed
-            
-        raw_samples = preloaded_song[:, self.song_idx : end_idx]
-        self.song_idx = end_idx
-        new_samples = (raw_samples * shared_state.volume).astype(np.int16)
         
-        new_frame = av.AudioFrame.from_ndarray(new_samples, layout="stereo" if new_samples.shape[0] == 2 else "mono")
-        new_frame.sample_rate = 48000
-        new_frame.time_base, new_frame.pts = frame.time_base, frame.pts
-        return new_frame
+        while self.fifo.samples < samples_needed:
+            try:
+                song_frame = next(self.packet_generator)
+            except StopIteration:
+                # Loop the song: seek to beginning
+                self.container.seek(0)
+                self.packet_generator = self.container.decode(self.stream)
+                song_frame = next(self.packet_generator)
+            except Exception:
+                break
 
-# The main WebRTC launcher
+            resampled_frames = self.resampler.resample(song_frame)
+            if resampled_frames:
+                self.fifo.write(resampled_frames[0])
+
+        if self.fifo.samples >= samples_needed:
+            output_frame = self.fifo.read(samples_needed)
+            
+            # Apply Volume
+            raw_samples = output_frame.to_ndarray()
+            
+            # Safe multiplication for volume
+            if raw_samples.dtype.kind == 'i':
+                new_samples = (raw_samples * shared_state.volume).astype(raw_samples.dtype)
+            elif raw_samples.dtype.kind == 'f':
+                 new_samples = (raw_samples * shared_state.volume).astype(raw_samples.dtype)
+            else:
+                 new_samples = raw_samples
+
+            new_frame = av.AudioFrame.from_ndarray(new_samples, layout=frame.layout.name)
+            new_frame.sample_rate = frame.sample_rate
+            new_frame.time_base = frame.time_base
+            new_frame.pts = frame.pts
+            return new_frame
+        
+        else:
+            return av.AudioFrame.from_ndarray(
+                np.zeros((frame.layout.channels, samples_needed), dtype=frame.to_ndarray().dtype),
+                layout=frame.layout.name
+            )
+
 webrtc_streamer(
-    key="gesture-volume-control",
+    key="gesture-volume",
     mode=WebRtcMode.SENDRECV,
     rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
     video_processor_factory=GestureProcessor,
     audio_processor_factory=AudioVolumeProcessor,
-    async_processing=True,
-    media_stream_constraints={"video": True, "audio": True}
-)
-
-# HTML Method: High-reliability Auto-start script
-st.markdown(
-    """
-    <script>
-    const clickStart = () => {
-        const buttons = Array.from(window.parent.document.querySelectorAll("button"));
-        const btn = buttons.find(b => b.innerText && b.innerText.trim().toLowerCase() === "start");
-        if (btn) {
-            btn.click();
-            console.log("Success: Auto-started the camera.");
-            return true;
-        }
-        return false;
-    };
-    const interval = setInterval(() => { if (clickStart()) clearInterval(interval); }, 1000);
-    setTimeout(() => clearInterval(interval), 40000); // Stop looking after 40 seconds
-    </script>
-    """,
-    unsafe_allow_html=True
+    media_stream_constraints={"video": True, "audio": True}, # Request Mic!
 )
