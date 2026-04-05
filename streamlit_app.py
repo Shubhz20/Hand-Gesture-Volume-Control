@@ -173,6 +173,6 @@ webrtc_streamer(
     },
     video_processor_factory=GestureProcessor,
     audio_processor_factory=AudioVolumeProcessor,
-    media_stream_constraints={"video": True, "audio": False},
+    media_stream_constraints={"video": True, "audio": True},
     async_processing=True,
 )
