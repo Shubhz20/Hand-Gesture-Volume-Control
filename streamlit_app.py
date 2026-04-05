@@ -8,7 +8,7 @@ st.write("This professional version uses client-side AI for zero latency and hig
 
 # Client-side AI Logic (HTML/JS/CSS)
 st.markdown(
-    \"\"\"
+    """
     <div id="app_frame" style="position: relative; width: 640px; height: 480px; margin: auto; background: #1a1a1a; border-radius: 16px; overflow: hidden; border: 4px solid #333; box-shadow: 0 10px 40px rgba(0,0,0,0.6);">
         <video id="input_video" style="display: none;" playsinline></video>
         <canvas id="output_canvas" width="640" height="480" style="width: 100%; height: 100%; transform: scaleX(-1);"></canvas>
@@ -138,7 +138,7 @@ st.markdown(
 
     startBtn.addEventListener('click', init);
     </script>
-    \"\"\",
+    """,
     unsafe_allow_html=True
 )
 
