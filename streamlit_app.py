@@ -97,84 +97,72 @@ class GestureProcessor(VideoProcessorBase):
             output_frames.append(av.VideoFrame.from_ndarray(image, format="bgr24"))
         return output_frames
 
+# --- PRELOAD SONG ONCE INTO MEMORY TO SAVE CPU ---
+@st.cache_data
+def load_song_to_memory():
+    print("Pre-decoding full song into RAM to prevent thread starvation...")
+    try:
+        container = av.open("song.mp3")
+        stream = container.streams.audio[0]
+        # Target standard WebRTC parameters: s16, stereo, 48000Hz
+        resampler = av.AudioResampler(format="s16", layout="stereo", rate=48000)
+        
+        frames = []
+        for packet in container.demux(stream):
+            for frame in packet.decode():
+                r_frames = resampler.resample(frame)
+                for r in r_frames:
+                    frames.append(r.to_ndarray())
+        # Concatenate all frames along the time axis (axis=1)
+        full_audio = np.concatenate(frames, axis=1)
+        print(f"Song loaded! Shape: {full_audio.shape}")
+        return full_audio
+    except Exception as e:
+        print("Error pre-loading song:", e)
+        return None
+
+preloaded_song = load_song_to_memory()
+
 class AudioVolumeProcessor(AudioProcessorBase):
     def __init__(self):
-        try:
-            self.container = av.open("song.mp3")
-            self.stream = self.container.streams.audio[0]
-            self.packet_generator = self.container.decode(self.stream)
-        except Exception as e:
-            print("Audio Init Error:", e)
-            self.container = None
-        self.resampler = None
-        self.fifo = av.AudioFifo()
+        self.song_idx = 0
 
     def recv_queued(self, frames):
         output_frames = []
         for frame in frames:
-            if self.container is None:
-                output_frames.append(av.AudioFrame.from_ndarray(
-                    np.zeros((frame.layout.channels, frame.samples), dtype=frame.to_ndarray().dtype),
-                    layout=frame.layout.name
-                ))
+            samples_needed = frame.samples
+            
+            # If song failed to load or frame is malformed, return silent padding
+            if preloaded_song is None or samples_needed <= 0:
+                silent_frame = av.AudioFrame.from_ndarray(
+                    np.zeros((2, max(samples_needed, 480)), dtype=np.int16),
+                    layout="stereo"
+                )
+                silent_frame.sample_rate = 48000
+                silent_frame.time_base = frame.time_base
+                silent_frame.pts = frame.pts
+                output_frames.append(silent_frame)
                 continue
+
+            end_idx = self.song_idx + samples_needed
+            
+            # If we reached the end of the song, loop back
+            if end_idx > preloaded_song.shape[1]:
+                self.song_idx = 0
+                end_idx = samples_needed
                 
-            try:
-                if self.resampler is None:
-                    self.resampler = av.AudioResampler(
-                        format=frame.format.name,
-                        layout=frame.layout.name,
-                        rate=frame.sample_rate,
-                    )
+            raw_samples = preloaded_song[:, self.song_idx : end_idx]
+            self.song_idx = end_idx
+            
+            # Safe multiplication for volume
+            new_samples = (raw_samples * shared_state.volume).astype(np.int16)
 
-                samples_needed = frame.samples
-                
-                max_loops = 5
-                loops = 0
-                while self.fifo.samples < samples_needed and loops < max_loops:
-                    loops += 1
-                    try:
-                        song_frame = next(self.packet_generator)
-                    except StopIteration:
-                        self.container.seek(0)
-                        self.packet_generator = self.container.decode(self.stream)
-                        song_frame = next(self.packet_generator)
-                    except Exception:
-                        break
-
-                    resampled_frames = self.resampler.resample(song_frame)
-                    if resampled_frames:
-                        for r_frame in resampled_frames:
-                            self.fifo.write(r_frame)
-
-                if self.fifo.samples >= samples_needed:
-                    output_frame = self.fifo.read(samples_needed)
-                    raw_samples = output_frame.to_ndarray()
-                    
-                    if raw_samples.dtype.kind == 'i':
-                        new_samples = (raw_samples * shared_state.volume).astype(raw_samples.dtype)
-                    elif raw_samples.dtype.kind == 'f':
-                         new_samples = (raw_samples * shared_state.volume).astype(raw_samples.dtype)
-                    else:
-                         new_samples = raw_samples
-
-                    new_frame = av.AudioFrame.from_ndarray(new_samples, layout=frame.layout.name)
-                    new_frame.sample_rate = frame.sample_rate
-                    new_frame.time_base = frame.time_base
-                    new_frame.pts = frame.pts
-                    output_frames.append(new_frame)
-                
-                else:
-                    output_frames.append(av.AudioFrame.from_ndarray(
-                        np.zeros((frame.layout.channels, samples_needed), dtype=frame.to_ndarray().dtype),
-                        layout=frame.layout.name
-                    ))
-            except Exception as e:
-                print("Audio Recv Error:", e)
-                output_frames.append(av.AudioFrame.from_ndarray(
-                    np.zeros((frame.layout.channels, frame.samples), dtype=frame.to_ndarray().dtype),
-                    layout=frame.layout.name
-                ))
+            new_frame = av.AudioFrame.from_ndarray(new_samples, layout="stereo")
+            new_frame.sample_rate = 48000
+            new_frame.time_base = frame.time_base
+            new_frame.pts = frame.pts
+            output_frames.append(new_frame)
+            
         return output_frames
 
 webrtc_streamer(
