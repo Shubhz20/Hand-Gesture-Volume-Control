@@ -4,5 +4,5 @@ opencv-python-headless
 mediapipe==0.10.9
 numpy
 av
-protobuf==3.20.3
-aiortc
+aiortc>=1.3.2
+aioice>=0.7.6

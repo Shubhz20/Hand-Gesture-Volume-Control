@@ -180,17 +180,10 @@ webrtc_streamer(
     key="gesture-volume",
     mode=WebRtcMode.SENDRECV,
     rtc_configuration={
-        "iceServers": [
-            {"urls": ["stun:stun.l.google.com:19302"]},
-            {"urls": ["stun:stun1.l.google.com:19302"]},
-            {"urls": ["stun:stun2.l.google.com:19302"]},
-            {"urls": ["stun:stun3.l.google.com:19302"]},
-            {"urls": ["stun:stun4.l.google.com:19302"]},
-        ],
-        "iceTransportPolicy": "all",
+        "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
     },
     video_processor_factory=GestureProcessor,
     audio_processor_factory=AudioVolumeProcessor,
     media_stream_constraints={"video": True, "audio": True},
-    async_processing=True,
+    async_processing=False,
 )
