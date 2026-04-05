@@ -107,63 +107,79 @@ class GestureProcessor(VideoProcessorBase):
 
 class AudioVolumeProcessor(AudioProcessorBase):
     def __init__(self):
-        self.container = av.open("song.mp3")
-        self.stream = self.container.streams.audio[0]
-        self.packet_generator = self.container.decode(self.stream)
+        try:
+            self.container = av.open("song.mp3")
+            self.stream = self.container.streams.audio[0]
+            self.packet_generator = self.container.decode(self.stream)
+        except Exception as e:
+            print("Audio Init Error:", e)
+            self.container = None
         self.resampler = None
         self.fifo = av.AudioFifo()
 
     def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
-        # Initialize resampler once we know the target format from the first incoming frame
-        if self.resampler is None:
-            self.resampler = av.AudioResampler(
-                format=frame.format.name,
-                layout=frame.layout.name,
-                rate=frame.sample_rate,
-            )
-
-        samples_needed = frame.samples
-        
-        while self.fifo.samples < samples_needed:
-            try:
-                song_frame = next(self.packet_generator)
-            except StopIteration:
-                # Loop the song: seek to beginning
-                self.container.seek(0)
-                self.packet_generator = self.container.decode(self.stream)
-                song_frame = next(self.packet_generator)
-            except Exception:
-                break
-
-            resampled_frames = self.resampler.resample(song_frame)
-            if resampled_frames:
-                self.fifo.write(resampled_frames[0])
-
-        if self.fifo.samples >= samples_needed:
-            output_frame = self.fifo.read(samples_needed)
-            
-            # Apply Volume
-            raw_samples = output_frame.to_ndarray()
-            
-            # Safe multiplication for volume
-            if raw_samples.dtype.kind == 'i':
-                new_samples = (raw_samples * shared_state.volume).astype(raw_samples.dtype)
-            elif raw_samples.dtype.kind == 'f':
-                 new_samples = (raw_samples * shared_state.volume).astype(raw_samples.dtype)
-            else:
-                 new_samples = raw_samples
-
-            new_frame = av.AudioFrame.from_ndarray(new_samples, layout=frame.layout.name)
-            new_frame.sample_rate = frame.sample_rate
-            new_frame.time_base = frame.time_base
-            new_frame.pts = frame.pts
-            return new_frame
-        
-        else:
+        if self.container is None:
+            # Fallback if audio file failed to load
             return av.AudioFrame.from_ndarray(
-                np.zeros((frame.layout.channels, samples_needed), dtype=frame.to_ndarray().dtype),
+                np.zeros((frame.layout.channels, frame.samples), dtype=frame.to_ndarray().dtype),
                 layout=frame.layout.name
             )
+            
+        try:
+            # Initialize resampler once we know the target format from the first incoming frame
+            if self.resampler is None:
+                self.resampler = av.AudioResampler(
+                    format=frame.format.name,
+                    layout=frame.layout.name,
+                    rate=frame.sample_rate,
+                )
+
+            samples_needed = frame.samples
+            
+            while self.fifo.samples < samples_needed:
+                try:
+                    song_frame = next(self.packet_generator)
+                except StopIteration:
+                    self.container.seek(0)
+                    self.packet_generator = self.container.decode(self.stream)
+                    song_frame = next(self.packet_generator)
+                except Exception:
+                    break
+
+                resampled_frames = self.resampler.resample(song_frame)
+                if resampled_frames:
+                    self.fifo.write(resampled_frames[0])
+
+            if self.fifo.samples >= samples_needed:
+                output_frame = self.fifo.read(samples_needed)
+                raw_samples = output_frame.to_ndarray()
+                
+                # Apply Volume
+                if raw_samples.dtype.kind == 'i':
+                    new_samples = (raw_samples * shared_state.volume).astype(raw_samples.dtype)
+                elif raw_samples.dtype.kind == 'f':
+                     new_samples = (raw_samples * shared_state.volume).astype(raw_samples.dtype)
+                else:
+                     new_samples = raw_samples
+
+                new_frame = av.AudioFrame.from_ndarray(new_samples, layout=frame.layout.name)
+                new_frame.sample_rate = frame.sample_rate
+                new_frame.time_base = frame.time_base
+                new_frame.pts = frame.pts
+                return new_frame
+            
+            else:
+                return av.AudioFrame.from_ndarray(
+                    np.zeros((frame.layout.channels, samples_needed), dtype=frame.to_ndarray().dtype),
+                    layout=frame.layout.name
+                )
+        except Exception as e:
+            print("Audio Recv Error:", e)
+            return av.AudioFrame.from_ndarray(
+                np.zeros((frame.layout.channels, frame.samples), dtype=frame.to_ndarray().dtype),
+                layout=frame.layout.name
+            )
+
 
 webrtc_streamer(
     key="gesture-volume",
