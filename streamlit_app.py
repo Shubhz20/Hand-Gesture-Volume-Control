@@ -1,199 +1,137 @@
-import os
-os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"
-os.environ["MESA_GL_VERSION_OVERRIDE"] = "3.3"
-os.environ["GLOG_minloglevel"] = "2"  # Suppresses the EGL/GPU C++ warnings
-
-
-import cv2
-import mediapipe as mp
-import numpy as np
 import streamlit as st
-import av
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, AudioProcessorBase, WebRtcMode
+import streamlit.components.v1 as components
 
+# Set page config
+st.set_page_config(page_title="Hand Gesture Volume Control", layout="centered")
 
-# Title and description
 st.title("Hand Gesture Volume Control")
-st.markdown(
+st.markdown("This version runs entirely in your browser using the **HTML Method** for maximum speed and zero lag.")
+st.info("Instructions: 1. Click Start. 2. Allow camera access. 3. Pinch index and thumb to change music volume.")
+
+# The "HTML Rule" - Client-side Hand Tracking and Volume Control
+# This uses MediaPipe JS via CDN and runs 100% on the user's computer.
+components.html(
     """
-    **Instructions:**
-    1. Click "Start" to open the camera and play music.
-    2. Show your hand. Pinch thumb and index finger to change volume.
-    3. The music is streamed from the server and volume is applied in real-time Python code!
-    """
-)
-
-
-# Shared state to communicate between Video and Audio processors
-class SharedState:
-    def __init__(self):
-        self.volume = 1.0  # 0.0 to 1.0
-
-if "shared_state" not in st.session_state:
-    st.session_state["shared_state"] = SharedState()
-
-shared_state = st.session_state["shared_state"]
-
-# --- PRELOAD SONG ONCE INTO MEMORY TO SAVE CPU ---
-@st.cache_data
-def load_song_to_memory():
-    print("Pre-decoding full song into RAM...")
-    try:
-        container = av.open("song.mp3")
-        stream = container.streams.audio[0]
-        # Target standard WebRTC parameters: s16, stereo, 48000Hz
-        resampler = av.AudioResampler(format="s16", layout="stereo", rate=48000)
+    <div id="container" style="position: relative; width: 640px; height: 480px; margin: auto; background: #000; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
+        <video id="input_video" style="display: none;" playsinline></video>
+        <canvas id="output_canvas" width="640" height="480" style="width: 100%; height: 100%; transform: scaleX(-1);"></canvas>
+        <div id="vol_bar_bg" style="position: absolute; right: 30px; top: 140px; width: 25px; height: 200px; background: rgba(255,255,255,0.2); border: 2px solid #fff; border-radius: 5px;"></div>
+        <div id="vol_bar_fill" style="position: absolute; right: 30px; bottom: 140px; width: 25px; height: 100px; background: #00ff88; border-radius: 3px; transition: height 0.1s;"></div>
+        <div id="vol_text" style="position: absolute; right: 15px; top: 110px; color: #fff; font-family: sans-serif; font-weight: bold; text-shadow: 1px 1px 2px #000;">Vol: 50%</div>
         
-        frames = []
-        for packet in container.demux(stream):
-            for frame in packet.decode():
-                r_frames = resampler.resample(frame)
-                for r in r_frames:
-                    frames.append(r.to_ndarray())
+        <audio id="bg_music" loop crossorigin="anonymous">
+            <source src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" type="audio/mpeg">
+        </audio>
         
-        full_audio = np.concatenate(frames, axis=1)
-        
-        # FORCE STEREO: If the decoded shape is (1, N), duplicate to (2, N)
-        if full_audio.shape[0] == 1:
-            full_audio = np.concatenate([full_audio, full_audio], axis=0)
-            
-        print(f"Song loaded! Shape: {full_audio.shape}")
-        return full_audio
-    except Exception as e:
-        st.error(f"Failed to load song.mp3: {e}")
-        return None
+        <button id="start_btn" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 20px 40px; font-size: 20px; cursor: pointer; background: #00ff88; border: none; border-radius: 8px; font-weight: bold; color: #000; z-index: 100;">Start Camera and Music</button>
+        <div id="loading_msg" style="position: absolute; left: 50%; top: 60%; transform: translate(-50%, -50%); color: #fff; display: none; font-family: sans-serif;">Loading AI Models...</div>
+    </div>
 
-preloaded_song = load_song_to_memory()
-if preloaded_song is not None:
-    st.success("Music and AI Models loaded. Starting camera...")
-else:
-    st.error("Music failed to load. Please check if song.mp3 exists.")
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
 
-class GestureProcessor(VideoProcessorBase):
-    def __init__(self):
-        self.mp_hands = mp.solutions.hands
-        self.hands = self.mp_hands.Hands(
-            static_image_mode=False,
-            max_num_hands=1,
-            model_complexity=0,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-        self.drawing_utils = mp.solutions.drawing_utils
-        self.prev_volume_pct = 50.0
-        self.smooth_factor = 0.3
-        self._frame_count = 0
-        self._last_landmarks = None
-
-    def recv(self, frame):
-        image = frame.to_ndarray(format="bgr24")
-        image = cv2.flip(image, 1)
-        frame_height, frame_width, _ = image.shape
-
-        self._frame_count += 1
-        # Skip 2 frames (process every 3rd) to ensure CPU stability on free tier
-        if self._frame_count % 3 == 0:
-            small = cv2.resize(image, (160, 120))
-            rgb_small = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
-            output = self.hands.process(rgb_small)
-            self._last_landmarks = output.multi_hand_landmarks
-
-        hands_landmarks = self._last_landmarks
-
-        if hands_landmarks:
-            for hand in hands_landmarks:
-                self.drawing_utils.draw_landmarks(image, hand)
-                landmarks = hand.landmark
-
-                thumb = landmarks[4]
-                index = landmarks[8]
-
-                x1 = int(index.x * frame_width)
-                y1 = int(index.y * frame_height)
-                x2 = int(thumb.x * frame_width)
-                y2 = int(thumb.y * frame_height)
-
-                cv2.line(image, (x1, y1), (x2, y2), (0, 255, 0), 4)
-
-                dist = ((x2 - x1)**2 + (y2 - y1)**2) ** 0.5 // 4
-                target_vol = max(0, min(100, (dist - 20) / (150 - 20) * 100))
-                self.prev_volume_pct += (target_vol - self.prev_volume_pct) * self.smooth_factor
-                shared_state.volume = self.prev_volume_pct / 100.0
-
-        bar_x, bar_y, bar_w, bar_h = 20, 70, 20, 150
-        filled = int(bar_h * self.prev_volume_pct / 100)
-        cv2.rectangle(image, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (200, 200, 200), -1)
-        cv2.rectangle(image, (bar_x, bar_y + bar_h - filled), (bar_x + bar_w, bar_y + bar_h), (0, 200, 100), -1)
-        cv2.rectangle(image, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (50, 50, 50), 2)
-
-        cv2.putText(image, f"Vol: {int(self.prev_volume_pct)}%", (10, 55),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-        return av.VideoFrame.from_ndarray(image, format="bgr24")
-
-class AudioVolumeProcessor(AudioProcessorBase):
-    def __init__(self):
-        self.song_idx = 0
-
-    def recv(self, frame):
-        samples_needed = frame.samples
-        if preloaded_song is None or samples_needed <= 0:
-            return av.AudioFrame.from_ndarray(np.zeros((2, max(samples_needed, 480)), dtype=np.int16), layout="stereo")
-
-        end_idx = self.song_idx + samples_needed
-        if end_idx > preloaded_song.shape[1]:
-            self.song_idx = 0
-            end_idx = samples_needed
-            
-        raw_samples = preloaded_song[:, self.song_idx : end_idx]
-        self.song_idx = end_idx
-        
-        new_samples = (raw_samples * shared_state.volume).astype(np.int16)
-        layout = "stereo" if new_samples.shape[0] == 2 else "mono"
-        
-        new_frame = av.AudioFrame.from_ndarray(new_samples, layout=layout)
-        new_frame.sample_rate = 48000
-        new_frame.time_base = frame.time_base
-        new_frame.pts = frame.pts
-        return new_frame
-
-webrtc_streamer(
-    key="gesture-volume",
-    mode=WebRtcMode.SENDRECV,
-    rtc_configuration={
-        "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
-    },
-    video_processor_factory=GestureProcessor,
-    audio_processor_factory=AudioVolumeProcessor,
-    media_stream_constraints={"video": True, "audio": True},
-    async_processing=True,
-)
-
-# HTML Method: High-reliability Auto-start via JS
-st.markdown(
-    """
     <script>
-    function tryClickStart() {
-        const buttons = Array.from(window.parent.document.querySelectorAll("button"));
-        const startBtn = buttons.find(b => b.textContent && b.textContent.trim().toLowerCase() === "start");
-        if (startBtn) {
-            startBtn.click();
-            console.log("Found and clicked Start button via HTML method");
-            return true;
+    const videoElement = document.getElementById('input_video');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const audio = document.getElementById('bg_music');
+    const startBtn = document.getElementById('start_btn');
+    const loadingMsg = document.getElementById('loading_msg');
+    const volFill = document.getElementById('vol_bar_fill');
+    const volText = document.getElementById('vol_text');
+
+    let currentVol = 0.5;
+    audio.volume = currentVol;
+
+    function onResults(results) {
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+        
+        if (results.multiHandLandmarks) {
+            for (const landmarks of results.multiHandLandmarks) {
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
+                drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2});
+
+                const index = landmarks[8];
+                const thumb = landmarks[4];
+
+                const dx = (index.x - thumb.x) * canvasElement.width;
+                const dy = (index.y - thumb.y) * canvasElement.height;
+                const distance = Math.sqrt(dx*dx + dy*dy);
+
+                // Map distance to volume
+                let vol = (distance - 30) / (180 - 30);
+                vol = Math.max(0, Math.min(1, vol));
+                
+                currentVol += (vol - currentVol) * 0.3;
+                audio.volume = currentVol;
+
+                const volPct = Math.round(currentVol * 100);
+                volFill.style.height = (volPct * 2) + 'px';
+                volText.innerText = 'Vol: ' + volPct + '%';
+
+                canvasCtx.beginPath();
+                canvasCtx.moveTo(thumb.x * canvasElement.width, thumb.y * canvasElement.height);
+                canvasCtx.lineTo(index.x * canvasElement.width, index.y * canvasElement.height);
+                canvasCtx.strokeStyle = '#fff';
+                canvasCtx.lineWidth = 4;
+                canvasCtx.stroke();
+            }
         }
-        return false;
+        canvasCtx.restore();
     }
 
-    // Set an interval to keep trying until the button is found and clicked
-    const autoClicker = setInterval(() => {
-        if (tryClickStart()) {
-            clearInterval(autoClicker);
+    const hands = new Hands({locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+    }});
+    hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+    });
+    hands.onResults(onResults);
+
+    const camera = new Camera(videoElement, {
+        onFrame: async () => {
+            await hands.send({image: videoElement});
+        },
+        width: 640,
+        height: 480
+    });
+
+    startBtn.onclick = async () => {
+        startBtn.style.display = 'none';
+        loadingMsg.style.display = 'block';
+        try {
+            await audio.play();
+            await camera.start();
+            loadingMsg.style.display = 'none';
+        } catch (err) {
+            alert("Error starting camera: " + err);
         }
-    }, 1000);
-    
-    // Safety timeout to clear after 30 seconds if never found
-    setTimeout(() => clearInterval(autoClicker), 30000);
+    };
     </script>
     """,
-    unsafe_allow_html=True
+    height=550,
 )
+
+st.write("---")
+st.subheader("Previous Python Code (Archived)")
+with st.expander("Show the commented out Python code base"):
+    st.code(\"\"\"
+# import cv2
+# import mediapipe as mp
+# import numpy as np
+# from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+
+# class GestureProcessor(VideoProcessorBase):
+#     def recv(self, frame):
+#         image = frame.to_ndarray(format="bgr24")
+#         # (AI Landmark Logic Here...)
+#         return av.VideoFrame.from_ndarray(image, format="bgr24")
+
+# webrtc_streamer(key="gesture-volume", video_processor_factory=GestureProcessor)
+\"\"\")
