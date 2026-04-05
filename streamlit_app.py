@@ -161,11 +161,7 @@ webrtc_streamer(
     key="gesture-volume",
     mode=WebRtcMode.SENDRECV,
     rtc_configuration={
-        "iceServers": [
-            {"urls": ["stun:stun.l.google.com:19302"]},
-            {"urls": ["turn:freeturn.net:3478"], "username": "free", "credential": "free"}
-        ],
-        "iceTransportPolicy": "all",
+        "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
     },
     video_processor_factory=GestureProcessor,
     audio_processor_factory=AudioVolumeProcessor,
@@ -173,41 +169,30 @@ webrtc_streamer(
     async_processing=True,
 )
 
-# HTML Method: Auto-start the camera via a background JavaScript observer
-# This ensures a direct click command is sent the moment the button is ready.
+# HTML Method: High-reliability Auto-start via JS
 st.markdown(
     """
     <script>
-    const observer = new MutationObserver((mutations) => {
-        for (const mutation of mutations) {
-            for (const node of mutation.addedNodes) {
-                if (node.nodeType === 1) {
-                    const buttons = node.querySelectorAll('button');
-                    for (const btn of buttons) {
-                        if (btn.innerText === "Start") {
-                            btn.click();
-                            observer.disconnect();
-                        }
-                    }
-                }
-            }
+    function tryClickStart() {
+        const buttons = Array.from(window.parent.document.querySelectorAll("button"));
+        const startBtn = buttons.find(b => b.textContent && b.textContent.trim().toLowerCase() === "start");
+        if (startBtn) {
+            startBtn.click();
+            console.log("Found and clicked Start button via HTML method");
+            return true;
         }
-    });
+        return false;
+    }
 
-    observer.observe(window.parent.document.body, {
-        childList: true,
-        subtree: true
-    });
-    
-    // Also try an immediate check for slow loads
-    setTimeout(() => {
-        const buttons = window.parent.document.querySelectorAll("button");
-        for (const btn of buttons) {
-            if (btn.innerText === "Start") {
-                btn.click();
-            }
+    // Set an interval to keep trying until the button is found and clicked
+    const autoClicker = setInterval(() => {
+        if (tryClickStart()) {
+            clearInterval(autoClicker);
         }
-    }, 2000);
+    }, 1000);
+    
+    // Safety timeout to clear after 30 seconds if never found
+    setTimeout(() => clearInterval(autoClicker), 30000);
     </script>
     """,
     unsafe_allow_html=True
