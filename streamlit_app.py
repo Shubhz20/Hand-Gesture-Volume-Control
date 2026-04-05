@@ -1,6 +1,8 @@
 import os
 os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"
 os.environ["MESA_GL_VERSION_OVERRIDE"] = "3.3"
+os.environ["GLOG_minloglevel"] = "2"  # Suppresses the EGL/GPU C++ warnings
+
 
 import cv2
 import mediapipe as mp
