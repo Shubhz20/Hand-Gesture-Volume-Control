@@ -1,9 +1,14 @@
 import cv2
 import mediapipe as mp
-
-import cv2
-import mediapipe as mp
 import numpy as np
+
+# Ensure mediapipe submodule is explicitly loaded
+try:
+    import mediapipe.python.solutions.hands as mp_hands
+    import mediapipe.python.solutions.drawing_utils as mp_drawing
+except ImportError:
+    import mediapipe.solutions.hands as mp_hands
+    import mediapipe.solutions.drawing_utils as mp_drawing
 import streamlit as st
 import av
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, AudioProcessorBase, WebRtcMode
@@ -32,13 +37,13 @@ shared_state = st.session_state["shared_state"]
 
 class GestureProcessor(VideoProcessorBase):
     def __init__(self):
-        self.mp_hands = mp.solutions.hands
+        self.mp_hands = mp_hands
         self.hands = self.mp_hands.Hands(
             model_complexity=0,
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5
         )
-        self.drawing_utils = mp.solutions.drawing_utils
+        self.drawing_utils = mp_drawing
         self.prev_volume_pct = 50.0 # 0-100 scale for display
         self.smooth_factor = 0.3
 
