@@ -1,0 +1,12 @@
+{
+  "name": "hand-gesture-volume-control",
+  "version": "1.0.0",
+  "description": "Hand Gesture Volume Control using MediaPipe and Static HTML/JS",
+  "main": "index.html",
+  "scripts": {
+    "start": "serve ."
+  },
+  "dependencies": {
+    "serve": "^14.2.4"
+  }
+}
