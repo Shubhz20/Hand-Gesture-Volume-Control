@@ -1,54 +1,57 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Gesture Volume Demo</title>
-  <style>
-    body {
-      background-color: #BFDDE0;
-      font-family: Arial;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      margin-top: 100px;
-    }
-    .card {
-      border: 3px solid black;
-      padding: 20px;
-      border-radius: 10px;
-      width: 380px;
-      text-align: center;
-      box-shadow: 0 5px 10px rgba(0,0,0,.1);
-    }
-    h2 { margin-bottom: 15px; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hand Gesture Volume Control | AI Sound Control</title>
+    <meta name="description" content="Revolutionize your audio experience with AI-powered hand gesture volume control. Seamless, touchless, and futuristic sound management.">
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <!-- MediaPipe Hands & Drawing dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
 </head>
 
 <body>
-  <div class="card">
-    <h2>Gesture Volume Controller 🎵</h2>
+    <main class="container" id="main-container">
+        <header>
+            <h1>AirVolume AI</h1>
+            <p class="subtitle">Experience frictionless sound control via hand gestures.</p>
+        </header>
 
-    <audio id="player" controls>
-      <source src="song.mp3" type="audio/mpeg">
-      Your browser does not support audio.
-    </audio>
+        <section class="media-grid">
+            <div class="video-wrapper">
+                <video id="input-video" playsinline hidden></video>
+                <canvas id="output-canvas" width="1280" height="720"></canvas>
+                <div class="video-overlay">
+                    <span class="dot"></span>
+                    <span>AI Gesture Engine Active</span>
+                </div>
+            </div>
 
-    <p style="margin-top:15px;">
-      Current Volume: <strong id="vol">--%</strong>
-    </p>
-  </div>
+            <div class="controls-card">
+                <div class="volume-display">
+                    <span class="volume-text">Current Volume</span>
+                    <span id="volume-val" class="volume-value">50%</span>
+                </div>
+                <div class="progress-container">
+                    <div id="volume-bar" class="progress-bar" style="width: 50%;"></div>
+                </div>
+                
+                <div style="margin-top: 10px;">
+                    <audio id="music-player" loop>
+                        <source src="song.mp3" type="audio/mpeg">
+                    </audio>
+                </div>
+                
+                <button id="start-btn" class="btn-start">Launch Gesture Control</button>
+            </div>
+        </section>
+    </main>
 
-  <script>
-    async function fetchVolume() {
-      try {
-        const res = await fetch("http://127.0.0.1:5055/volume");
-        const data = await res.json();
-        document.getElementById("vol").innerText = data.volume + "%";
-      } catch (err) {
-        document.getElementById("vol").innerText = "--";
-      }
-    }
-
-    setInterval(fetchVolume, 400);
-  </script>
+    <script src="web_app.js"></script>
 </body>
 </html>
